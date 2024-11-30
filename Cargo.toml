@@ -1,0 +1,12 @@
+[package]
+name = 'locos'
+version = '0.1.0'
+edition = '2024'
+authors = ['Mako', 'JayAndJef']
+
+[workspace]
+members = ['kernel']
+
+[build-dependencies]
+kernel = { path = 'kernel', artifact = 'bin', target = 'x86_64-unknown-none' }
+bootloader = { git = 'https://github.com/rust-osdev/bootloader.git' }
