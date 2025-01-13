@@ -17,12 +17,30 @@ You should have received a copy of the GNU General Public License along with loc
 
 #![no_std]
 #![no_main]
+pub mod framebuffer;
 
 use core::panic::PanicInfo;
 
-use bootloader_api::{BootInfo, entry_point};
+use bootloader_api::{entry_point, info::FrameBufferInfo, BootInfo};
+use bootloader_x86_64_common::logger::LockedLogger;
+use conquer_once::spin::OnceCell;
 
-fn kernel_main(_boot_info: &'static mut BootInfo) -> ! {
+pub(crate) static LOGGER: OnceCell<LockedLogger> = OnceCell::uninit();
+
+pub(crate) fn init_logger(framebuffer: &'static mut [u8], info: FrameBufferInfo) {
+    let logger = LOGGER.get_or_init(move || LockedLogger::new(framebuffer, info, true, false));
+    log::set_logger(logger).expect("logger already set");
+    log::set_max_level(log::LevelFilter::Trace);
+    log::info!("Hello, world!");
+}
+
+fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
+    let framebuffer_optional = &mut boot_info.framebuffer;
+    let deref_framebuffer = framebuffer_optional.as_mut();
+    let framebuffer = deref_framebuffer.unwrap();
+    let info_duplicate = framebuffer.info().clone();
+    let raw_buffer = framebuffer.buffer_mut();
+    init_logger(raw_buffer, info_duplicate);
     loop {}
 }
 
