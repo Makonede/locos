@@ -1,14 +1,24 @@
+/*
+Copyright © 2024–2025 Mako and JayAndJef
+
+This file is part of locOS.
+
+locOS is free software: you can redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation, either version 3 of the License, or (at
+your option) any later version.
+
+locOS is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public
+License for more details.
+
+You should have received a copy of the GNU General Public License along with locOS. If not, see
+<https://www.gnu.org/licenses/>.
+*/
+
 use crate::framebuffer::Display;
-use embedded_graphics::{
-    Drawable,
-    mono_font::{
-        MonoFont, MonoTextStyle,
-        ascii::{FONT_6X10, FONT_8X13, FONT_10X20},
-    },
-    pixelcolor::Rgb888,
-    prelude::Point,
-    text::Text,
-};
+use embedded_graphics::{Drawable, mono_font::{MonoFont, MonoTextStyle, ascii::{
+    FONT_6X10, FONT_8X13, FONT_10X20
+}}, pixelcolor::Rgb888, prelude::Point, text::Text};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenChar {

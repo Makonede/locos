@@ -1,5 +1,5 @@
 /*
-Copyright © 2024 Mako and JayAndJef
+Copyright © 2024–2025 Mako and JayAndJef
 
 This file is part of locOS.
 
