@@ -18,9 +18,9 @@ You should have received a copy of the GNU General Public License along with loc
 use core::convert::Infallible;
 
 use bootloader_api::info::{FrameBuffer, PixelFormat};
-use embedded_graphics::{pixelcolor::Rgb888, prelude::{
+use embedded_graphics::{Pixel, pixelcolor::Rgb888, prelude::{
     DrawTarget, OriginDimensions, RgbColor
-}, Pixel};
+}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
