@@ -20,7 +20,7 @@ You should have received a copy of the GNU General Public License along with loc
 pub mod console;
 pub mod framebuffer;
 
-use core::{char, panic::PanicInfo};
+use core::panic::PanicInfo;
 
 use bootloader_api::{BootInfo, entry_point, info::FrameBufferInfo};
 use bootloader_x86_64_common::logger::LockedLogger;
