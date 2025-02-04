@@ -26,6 +26,28 @@ pub struct ScreenChar {
     pub color: Rgb888,
 }
 
+impl ScreenChar {
+    pub fn new(character: char, color: Rgb888) -> Self {
+        Self { character, color }
+    }
+}
+
+#[macro_export]
+macro_rules! screen_chars {
+    ($text:expr, $color:expr) => {
+        {
+            const LEN: usize = $text.len();
+            let mut chars = [ScreenChar::new(' ', $color); LEN];
+            let mut i = 0;
+            for c in $text.chars() {
+                chars[i] = ScreenChar::new(c, $color);
+                i += 1;
+            }
+            chars
+        }
+    }
+}
+
 const BUFFER_WIDTH: usize = 80;
 const BUFFER_HEIGHT: usize = 25;
 

@@ -20,7 +20,7 @@ You should have received a copy of the GNU General Public License along with loc
 pub mod console;
 pub mod framebuffer;
 
-use core::panic::PanicInfo;
+use core::{char, panic::PanicInfo};
 
 use bootloader_api::{BootInfo, entry_point, info::FrameBufferInfo};
 use bootloader_x86_64_common::logger::LockedLogger;
@@ -46,16 +46,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let binding = DisplayWriter::select_font(framebuffer_info.height, framebuffer_info.width);
     let mut displaywriter = DisplayWriter::new(
         &mut display,
-        MonoTextStyle::new(
-            &binding,
-            Rgb888::new(255, 255, 255),
-        ),
+        MonoTextStyle::new(&binding, Rgb888::new(255, 255, 255)),
     );
-    let character = ScreenChar {
-        character: 'h',
-        color: Rgb888::new(255, 255, 255),
-    };
-    displaywriter.write_char(0, 0, character).expect("error wrting character");
+    displaywriter
+        .write_string(
+            0,
+            0,
+            &screen_chars!("Hello, world!", Rgb888::new(255, 255, 255)),
+        )
+        .expect("Failed to write string");
     loop {}
 }
 
