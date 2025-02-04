@@ -87,6 +87,19 @@ impl<'a> Display<'a> {
             set_pixel_in(self.framebuffer, Position { x, y }, color);
         };
     }
+
+    pub fn fill_display(&mut self, color: Rgb888) {
+        let color = Color { red: color.r(), green: color.g(), blue: color.b() };
+        let info = self.framebuffer.info();
+        let width = info.width;
+        let height = info.height;
+
+        for y in 0..height {
+            for x in 0..width {
+                set_pixel_in(self.framebuffer, Position { x, y }, color);
+            }
+        }
+    }
 }
 
 impl<'a> DrawTarget for Display<'a> {

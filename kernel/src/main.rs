@@ -43,6 +43,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let framebuffer = framebuffer_option.as_mut().unwrap();
     let framebuffer_info = framebuffer.info();
     let mut display = Display::new(framebuffer);
+    display.fill_display(Rgb888::new(0, 0, 0));
     let binding = DisplayWriter::select_font(framebuffer_info.height, framebuffer_info.width);
     let mut displaywriter = DisplayWriter::new(
         &mut display,
