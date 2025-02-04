@@ -143,12 +143,16 @@ impl<'a> DisplayWriter<'a> {
         let mut y = offset_y;
         let mut x = offset_x;
 
-        for (i, c) in characters.iter().enumerate() {
-            if x + i >= BUFFER_WIDTH {
+        for c in characters.iter() {
+            if x >= BUFFER_WIDTH {
                 y += 1;
                 x = 0;
             }
-            self.write_char(y, x + i, *c)?;
+            if y >= BUFFER_HEIGHT {
+                return Err(DisplayError::OutOfBounds);
+            }
+            self.write_char(y, x, *c)?;
+            x += 1;
         }
         Ok(())
     }
