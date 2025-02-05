@@ -48,8 +48,8 @@ macro_rules! screen_chars {
     }
 }
 
-const BUFFER_WIDTH: usize = 80;
-const BUFFER_HEIGHT: usize = 25;
+pub(crate) const BUFFER_WIDTH: usize = 80;
+pub(crate) const BUFFER_HEIGHT: usize = 25;
 
 #[derive(Debug, Clone, Copy)]
 pub enum DisplayError {
@@ -59,7 +59,7 @@ pub enum DisplayError {
 
 pub struct DisplayWriter<'a> {
     display: &'a mut Display<'a>,
-    buffer: [[ScreenChar; BUFFER_WIDTH]; BUFFER_HEIGHT],
+    pub buffer: [[ScreenChar; BUFFER_WIDTH]; BUFFER_HEIGHT],
     text_style: MonoTextStyle<'a, Rgb888>,
 }
 

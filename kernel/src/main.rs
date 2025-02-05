@@ -19,6 +19,7 @@ You should have received a copy of the GNU General Public License along with loc
 #![no_main]
 pub mod console;
 pub mod framebuffer;
+pub mod linewriter;
 
 use core::panic::PanicInfo;
 
@@ -26,8 +27,9 @@ use bootloader_api::{BootInfo, entry_point, info::FrameBufferInfo};
 use bootloader_x86_64_common::logger::LockedLogger;
 use conquer_once::spin::OnceCell;
 use console::{DisplayWriter, ScreenChar};
-use embedded_graphics::{mono_font::MonoTextStyle, pixelcolor::Rgb888};
+use embedded_graphics::{mono_font::{MonoTextStyle, MonoTextStyleBuilder}, pixelcolor::Rgb888, primitives::line};
 use framebuffer::Display;
+use linewriter::LineWriter;
 
 pub(crate) static _LOGGER: OnceCell<LockedLogger> = OnceCell::uninit();
 
@@ -47,15 +49,23 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let binding = DisplayWriter::select_font(framebuffer_info.height, framebuffer_info.width);
     let mut displaywriter = DisplayWriter::new(
         &mut display,
-        MonoTextStyle::new(&binding, Rgb888::new(255, 255, 255)),
+        MonoTextStyleBuilder::new()
+            .font(&binding)
+            .text_color(Rgb888::new(255, 255, 255))
+            .background_color(Rgb888::new(0, 0, 0)) // kind of hacky fix for non-overlapping text
+            .build(),
     );
-    displaywriter
-        .write_string(
-            0,
-            0,
-            &screen_chars!("Hello, world!", Rgb888::new(255, 255, 255)),
-        )
-        .expect("Failed to write string");
+    let mut linewriter = LineWriter::new(&mut displaywriter);
+    let lines = [
+        "Linewriters are cool.",
+        "Hello, World!",
+        "Hello, Universe!",
+        "This is a short line.",
+        "This is a long line that should.................................................................... be wrapped around to the next line.",
+    ];
+    for line in lines.iter() {
+        linewriter.writeln(line).unwrap();
+    }
     loop {}
 }
 
