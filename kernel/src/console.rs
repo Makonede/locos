@@ -58,13 +58,13 @@ pub enum DisplayError {
 }
 
 pub struct DisplayWriter<'a> {
-    display: &'a mut Display<'a>,
+    display: Display<'a>,
     pub buffer: [[ScreenChar; BUFFER_WIDTH]; BUFFER_HEIGHT],
     text_style: MonoTextStyle<'a, Rgb888>,
 }
 
 impl<'a> DisplayWriter<'a> {
-    pub fn new(display: &'a mut Display<'a>, text_style: MonoTextStyle<'a, Rgb888>) -> Self {
+    pub fn new(display: Display<'a>, text_style: MonoTextStyle<'a, Rgb888>) -> Self {
         let default_char = ScreenChar {
             character: ' ',
             color: Rgb888::new(255, 255, 255),
@@ -77,7 +77,7 @@ impl<'a> DisplayWriter<'a> {
         }
     }
 
-    pub fn select_font(height: usize, width: usize) -> MonoFont<'a> {
+    pub fn select_font(height: usize, width: usize) -> MonoFont<'static> {
         let char_width = width / BUFFER_WIDTH;
         let char_height = height / BUFFER_HEIGHT;
 
@@ -117,7 +117,7 @@ impl<'a> DisplayWriter<'a> {
             Point::new(x_coords as i32, y_coords as i32),
             style,
         )
-        .draw(self.display)
+        .draw(&mut self.display)
         .map_err(|_| DisplayError::DrawError)?;
 
         Ok(())

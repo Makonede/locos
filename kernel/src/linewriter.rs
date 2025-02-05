@@ -1,3 +1,5 @@
+use core::fmt::Write;
+
 use embedded_graphics::pixelcolor::Rgb888;
 
 use crate::console::{BUFFER_HEIGHT, BUFFER_WIDTH, DisplayError, DisplayWriter, ScreenChar};
@@ -6,11 +8,11 @@ use crate::console::{BUFFER_HEIGHT, BUFFER_WIDTH, DisplayError, DisplayWriter, S
 /// NOTE: This is a very simple implementation that does not handle scrolling, and might get merged into DisplayWriter in the future.
 pub struct LineWriter<'a> {
     cursor_position: usize,
-    displaywriter: &'a mut DisplayWriter<'a>,
+    displaywriter: DisplayWriter<'a>,
 }
 
 impl<'a> LineWriter<'a> {
-    pub fn new(displaywriter: &'a mut DisplayWriter<'a>) -> Self {
+    pub fn new(displaywriter: DisplayWriter<'a>) -> Self {
         Self {
             cursor_position: 0,
             displaywriter,
@@ -53,10 +55,13 @@ impl<'a> LineWriter<'a> {
 
         Ok(())
     }
+}
 
-    pub fn writeln(&mut self, string: &str) -> Result<(), DisplayError> {
-       self.write(string)?;
-       self.write("\n")?;
-       Ok(())
+impl Write for LineWriter<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        match self.write(s) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(core::fmt::Error),
+        }
     }
 }

@@ -23,39 +23,70 @@ pub mod linewriter;
 
 use core::panic::PanicInfo;
 
-use bootloader_api::{BootInfo, entry_point, info::FrameBufferInfo};
-use bootloader_x86_64_common::logger::LockedLogger;
+use bootloader_api::{entry_point, info::{FrameBuffer, FrameBufferInfo}, BootInfo};
 use conquer_once::spin::OnceCell;
-use console::{DisplayWriter, ScreenChar};
-use embedded_graphics::{mono_font::{MonoTextStyle, MonoTextStyleBuilder}, pixelcolor::Rgb888, primitives::line};
+use spin::mutex::Mutex;
+use console::DisplayWriter;
+use embedded_graphics::{mono_font::{MonoFont, MonoTextStyleBuilder}, pixelcolor::Rgb888};
 use framebuffer::Display;
 use linewriter::LineWriter;
 
-pub(crate) static _LOGGER: OnceCell<LockedLogger> = OnceCell::uninit();
+pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
 
-pub(crate) fn _init_logger(framebuffer: &'static mut [u8], info: FrameBufferInfo) {
-    let logger = _LOGGER.get_or_init(move || LockedLogger::new(framebuffer, info, true, false));
-    log::set_logger(logger).expect("logger already set");
-    log::set_max_level(log::LevelFilter::Trace);
-    log::info!("Hello, World!");
+static FONT: OnceCell<MonoFont> = OnceCell::uninit();
+
+pub fn init_font(info: FrameBufferInfo) {
+    FONT.init_once(|| DisplayWriter::select_font(info.height, info.width));
 }
+
+pub fn init_writer(framebuffer: &'static mut FrameBuffer, info: FrameBufferInfo) {
+    let display = Display::new(framebuffer);
+    init_font(info);
+    let displaywriter = DisplayWriter::new(
+        display,
+        MonoTextStyleBuilder::new()
+            .font(FONT.get().unwrap())
+            .text_color(Rgb888::new(255, 255, 255))
+            .background_color(Rgb888::new(0, 0, 0)) // kind of hacky fix for non-overlapping text
+            .build(),
+    );
+
+    *WRITER.lock() = Some(LineWriter::new(displaywriter));
+}
+
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        {
+            use core::fmt::Write;
+            let _ = write!(WRITER.lock().as_mut().unwrap(), $($arg)*);
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! println {
+    () => {
+        {
+            $crate::print!("\n");
+        }
+    };
+    ($($arg:tt)*) => {
+        {
+            $crate::print!("{}\n", format_args!($($arg)*));
+        }
+    };
+}
+
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let framebuffer_option = &mut boot_info.framebuffer;
     let framebuffer = framebuffer_option.as_mut().unwrap();
     let framebuffer_info = framebuffer.info();
-    let mut display = Display::new(framebuffer);
-    display.fill_display(Rgb888::new(0, 0, 0));
-    let binding = DisplayWriter::select_font(framebuffer_info.height, framebuffer_info.width);
-    let mut displaywriter = DisplayWriter::new(
-        &mut display,
-        MonoTextStyleBuilder::new()
-            .font(&binding)
-            .text_color(Rgb888::new(255, 255, 255))
-            .background_color(Rgb888::new(0, 0, 0)) // kind of hacky fix for non-overlapping text
-            .build(),
-    );
-    let mut linewriter = LineWriter::new(&mut displaywriter);
+    init_writer(framebuffer, framebuffer_info);
+    // WRITER.init_once(|| Mutex::new(linewriter));
+
+    //init_writer(framebuffer);
     let lines = [
         "Linewriters are cool.",
         "Hello, World!",
@@ -63,9 +94,11 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         "This is a short line.",
         "This is a long line that should.................................................................... be wrapped around to the next line.",
     ];
+
     for line in lines.iter() {
-        linewriter.writeln(line).unwrap();
+        println!("{}", line);
     }
+    panic!("something happened! panic!");
     loop {}
 }
 
@@ -73,6 +106,6 @@ entry_point!(kernel_main);
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    log::error!("{info:?}");
+    println!("{}", info);
     loop {}
 }
