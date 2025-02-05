@@ -20,6 +20,7 @@ You should have received a copy of the GNU General Public License along with loc
 pub mod console;
 pub mod framebuffer;
 pub mod linewriter;
+pub mod serial;
 
 use core::panic::PanicInfo;
 
@@ -107,5 +108,6 @@ entry_point!(kernel_main);
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     println!("{}", info);
+    serial_println!("{}", info);
     loop {}
 }
