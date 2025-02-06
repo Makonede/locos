@@ -13,7 +13,7 @@ pub static SERIAL1: Lazy<Mutex<SerialPort>> = Lazy::new(|| {
 macro_rules! serial_print {
     ($($arg:tt)*) => {
         use core::fmt::Write;
-        use crate::serial::SERIAL1;
+        use $crate::serial::SERIAL1;
         let _ = write!(SERIAL1.lock(), $($arg)*);
     };
 }

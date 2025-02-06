@@ -102,7 +102,7 @@ impl<'a> Display<'a> {
     }
 }
 
-impl<'a> DrawTarget for Display<'a> {
+impl DrawTarget for Display<'_> {
     type Color = Rgb888;
 
     type Error = Infallible;
@@ -116,7 +116,7 @@ impl<'a> DrawTarget for Display<'a> {
     }
 } 
 
-impl<'a> OriginDimensions for Display<'a> {
+impl OriginDimensions for Display<'_> {
     fn size(&self) -> embedded_graphics::prelude::Size {
         let info = self.framebuffer.info();
         embedded_graphics::prelude::Size::new(info.width as u32, info.height as u32)

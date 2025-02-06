@@ -15,7 +15,7 @@ You should have received a copy of the GNU General Public License along with loc
 <https://www.gnu.org/licenses/>.
 */
 
-use crate::framebuffer::Display;
+use crate::output::framebuffer::Display;
 use embedded_graphics::{Drawable, mono_font::{MonoFont, MonoTextStyle, ascii::{
     FONT_6X10, FONT_8X13, FONT_10X20
 }}, pixelcolor::Rgb888, prelude::Point, text::Text};
@@ -48,8 +48,8 @@ macro_rules! screen_chars {
     }
 }
 
-pub(crate) const BUFFER_WIDTH: usize = 80;
-pub(crate) const BUFFER_HEIGHT: usize = 25;
+pub const BUFFER_WIDTH: usize = 80;
+pub const BUFFER_HEIGHT: usize = 25;
 
 #[derive(Debug, Clone, Copy)]
 pub enum DisplayError {

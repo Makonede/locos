@@ -2,7 +2,7 @@ use core::fmt::Write;
 
 use embedded_graphics::pixelcolor::Rgb888;
 
-use crate::console::{BUFFER_HEIGHT, BUFFER_WIDTH, DisplayError, DisplayWriter, ScreenChar};
+use crate::output::console::{BUFFER_HEIGHT, BUFFER_WIDTH, DisplayError, DisplayWriter, ScreenChar};
 
 /// Simple class that always outputs to the last line of the screen and always uses white text.
 /// NOTE: This is a very simple implementation that does not handle scrolling, and might get merged into DisplayWriter in the future.

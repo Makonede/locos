@@ -17,9 +17,7 @@ You should have received a copy of the GNU General Public License along with loc
 
 #![no_std]
 #![no_main]
-pub mod console;
-pub mod framebuffer;
-pub mod linewriter;
+pub mod output;
 pub mod serial;
 
 use core::panic::PanicInfo;
@@ -27,10 +25,8 @@ use core::panic::PanicInfo;
 use bootloader_api::{entry_point, info::{FrameBuffer, FrameBufferInfo}, BootInfo};
 use conquer_once::spin::OnceCell;
 use spin::mutex::Mutex;
-use console::DisplayWriter;
 use embedded_graphics::{mono_font::{MonoFont, MonoTextStyleBuilder}, pixelcolor::Rgb888};
-use framebuffer::Display;
-use linewriter::LineWriter;
+use output::{Display, DisplayWriter, LineWriter};
 
 pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
 
