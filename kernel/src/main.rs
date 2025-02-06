@@ -103,7 +103,7 @@ entry_point!(kernel_main);
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    println!("{}", info);
     serial_println!("{}", info);
+    println!("{}", info);
     loop {}
 }
