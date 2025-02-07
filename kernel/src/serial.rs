@@ -11,11 +11,13 @@ pub static SERIAL1: Lazy<Mutex<SerialPort>> = Lazy::new(|| {
 
 #[macro_export]
 macro_rules! serial_print {
-    ($($arg:tt)*) => {
-        use core::fmt::Write;
-        use $crate::serial::SERIAL1;
-        let _ = write!(SERIAL1.lock(), $($arg)*);
-    };
+    ($($arg:tt)*) => {{
+        // Use absolute paths to prevent conflicts
+        let _ = ::core::fmt::Write::write_fmt(
+            &mut *$crate::serial::SERIAL1.lock(),
+            format_args!($($arg)*)
+        );
+    }};
 }
 
 #[macro_export]
