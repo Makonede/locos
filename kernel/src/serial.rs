@@ -21,9 +21,9 @@ macro_rules! serial_print {
 #[macro_export]
 macro_rules! serial_println {
     () => {
-        serial_print!("\n");
+        $crate::serial_print!("\n");
     };
     ($($arg:tt)*) => {
-        serial_print!("{}\n", format_args!($($arg)*));
+        $crate::serial_print!("{}\n", format_args!($($arg)*));
     };
 }

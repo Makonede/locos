@@ -17,13 +17,18 @@ You should have received a copy of the GNU General Public License along with loc
 
 #![no_std]
 #![no_main]
+#![feature(abi_x86_interrupt)]
 pub mod output;
 pub mod serial;
+pub mod interrupts;
+pub mod gdt;
 
 use core::panic::PanicInfo;
 
 use bootloader_api::{entry_point, info::{FrameBuffer, FrameBufferInfo}, BootInfo};
 use conquer_once::spin::OnceCell;
+use gdt::init_gdt;
+use interrupts::init_idt;
 use spin::mutex::Mutex;
 use embedded_graphics::{mono_font::{MonoFont, MonoTextStyleBuilder}, pixelcolor::Rgb888};
 use output::{Display, DisplayWriter, LineWriter};
@@ -56,6 +61,7 @@ macro_rules! print {
     ($($arg:tt)*) => {
         {
             use core::fmt::Write;
+            use $crate::WRITER;
             let _ = write!(WRITER.lock().as_mut().unwrap(), $($arg)*);
         }
     };
@@ -77,6 +83,8 @@ macro_rules! println {
 
 
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
+    init_gdt();
+    init_idt();
     let framebuffer_option = &mut boot_info.framebuffer;
     let framebuffer = framebuffer_option.as_mut().unwrap();
     let framebuffer_info = framebuffer.info();
@@ -95,6 +103,14 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     for line in lines.iter() {
         println!("{}", line);
     }
+    x86_64::instructions::interrupts::int3();
+    
+    fn stack_overflow() {
+        stack_overflow();
+    }
+
+    stack_overflow();
+
     panic!("something happened! panic!");
     loop {}
 }
