@@ -39,6 +39,7 @@ use embedded_graphics::{
 };
 use gdt::init_gdt;
 use interrupts::init_idt;
+use memory::BootInfoFrameAllocator;
 use output::{Display, DisplayWriter, LineWriter};
 use spin::mutex::Mutex;
 
@@ -96,6 +97,9 @@ macro_rules! println {
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     init_gdt();
     init_idt();
+    let _frame_allocator = unsafe {
+        BootInfoFrameAllocator::init(&boot_info.memory_regions)
+    };
     let framebuffer_option = &mut boot_info.framebuffer;
     let framebuffer = framebuffer_option.as_mut().unwrap();
     let framebuffer_info = framebuffer.info();
