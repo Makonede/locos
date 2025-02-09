@@ -51,6 +51,7 @@ pub fn init_font(info: FrameBufferInfo) {
     FONT.init_once(|| DisplayWriter::select_font(info.height, info.width));
 }
 
+/// Initializes the global display writer.
 pub fn init_writer(framebuffer: &'static mut FrameBuffer, info: FrameBufferInfo) {
     let display = Display::new(framebuffer);
     init_font(info);
@@ -66,6 +67,7 @@ pub fn init_writer(framebuffer: &'static mut FrameBuffer, info: FrameBufferInfo)
     *WRITER.lock() = Some(LineWriter::new(displaywriter));
 }
 
+/// Global print! macro that writes to the framebuffer.
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {
@@ -77,6 +79,7 @@ macro_rules! print {
     };
 }
 
+/// Global println! macro that writes to the framebuffer.
 #[macro_export]
 macro_rules! println {
     () => {

@@ -20,6 +20,9 @@ use embedded_graphics::{Drawable, mono_font::{MonoFont, MonoTextStyle, ascii::{
     FONT_6X10, FONT_8X13, FONT_10X20
 }}, pixelcolor::Rgb888, prelude::Point, text::Text};
 
+/// Represents a character and its color for console display.
+///
+/// Used for framebuffer output.
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenChar {
     pub character: char,
@@ -32,6 +35,16 @@ impl ScreenChar {
     }
 }
 
+/// Creates an array of `ScreenChar` from a string slice with a specified color.
+///
+/// This macro takes a string literal and a color, and returns a fixed-size array
+/// of `ScreenChar` structs, where each character in the string is converted into
+/// a `ScreenChar` with the specified color.
+///
+/// # Arguments
+///
+/// * `$text` - A string literal (`&str`) to convert into `ScreenChar` array.
+/// * `$color` - An `Rgb888` color to apply to all characters.
 #[macro_export]
 macro_rules! screen_chars {
     ($text:expr, $color:expr) => {
@@ -51,12 +64,18 @@ macro_rules! screen_chars {
 pub const BUFFER_WIDTH: usize = 80;
 pub const BUFFER_HEIGHT: usize = 25;
 
+/// Represents errors that can occur during display operations.
 #[derive(Debug, Clone, Copy)]
 pub enum DisplayError {
     OutOfBounds,
     DrawError,
 }
 
+/// Manages writing characters to the display buffer and rendering them.
+///
+/// This struct provides methods for writing characters and strings
+/// to an in-memory buffer, and then rendering that buffer to the framebuffer. It
+/// uses the `embedded-graphics` crate for drawing operations.
 pub struct DisplayWriter<'a> {
     display: Display<'a>,
     pub buffer: [[ScreenChar; BUFFER_WIDTH]; BUFFER_HEIGHT],
@@ -77,6 +96,9 @@ impl<'a> DisplayWriter<'a> {
         }
     }
 
+    /// Selects a font based on the display height and width.
+    /// Returns a static 'MonoFont'. Consider using a `OnceCell` or similar
+    /// to store the font.
     pub fn select_font(height: usize, width: usize) -> MonoFont<'static> {
         let char_width = width / BUFFER_WIDTH;
         let char_height = height / BUFFER_HEIGHT;
@@ -92,6 +114,7 @@ impl<'a> DisplayWriter<'a> {
         }
     }
 
+    /// Flushes the buffer at point to the framebuffer.
     pub fn flush_buffer_at_point(
         &mut self,
         offset_y: usize,
@@ -123,6 +146,7 @@ impl<'a> DisplayWriter<'a> {
         Ok(())
     }
 
+    /// Writes a character to the buffer at the specified coordinates.
     pub fn write_char(
         &mut self,
         offset_y: usize,
@@ -134,6 +158,8 @@ impl<'a> DisplayWriter<'a> {
         Ok(())
     }
 
+    /// Writes a string to the buffer at the specified coordinates, wrapping if necessary.
+    #[deprecated(note = "Use LineWriter as a wrapper around DisplayWriter instead.")]
     pub fn write_string(
         &mut self,
         offset_y: usize,

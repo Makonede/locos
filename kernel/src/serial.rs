@@ -3,12 +3,14 @@ use conquer_once::spin::Lazy;
 use spin::Mutex;
 
 
+/// Serial port for writing to the serial interface in QEMU.
 pub static SERIAL1: Lazy<Mutex<SerialPort>> = Lazy::new(|| {
     let mut serial_port = unsafe { SerialPort::new(0x3F8) };
     serial_port.init();
     Mutex::new(serial_port)
 });
 
+/// Global print! macro that writes to the serial interface in QEMU.
 #[macro_export]
 macro_rules! serial_print {
     ($($arg:tt)*) => {{
@@ -20,6 +22,7 @@ macro_rules! serial_print {
     }};
 }
 
+/// Global println! macro that writes to the serial interface in QEMU.
 #[macro_export]
 macro_rules! serial_println {
     () => {

@@ -3,6 +3,11 @@ use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, Pag
 
 use crate::{println, serial_println};
 
+/// Interrupt Descriptor Table with handlers for inturrupts.
+/// Current supported interrupts:
+/// - Breakpoint
+/// - Page Fault
+/// - Double Fault
 static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     let mut idt = InterruptDescriptorTable::new();
     idt.breakpoint.set_handler_fn(breakpoint_handler);
@@ -14,6 +19,7 @@ static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     idt
 });
 
+/// Initialize the Interrupt Descriptor Table.
 pub fn init_idt() {
     IDT.load();
 }

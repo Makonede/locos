@@ -19,6 +19,7 @@ impl<'a> LineWriter<'a> {
         }
     }
 
+    /// Shifts the buffer up by one line, clearing the last.
     fn shift_buffer_up(&mut self) -> Result<(), DisplayError> {
         for y in 0..BUFFER_HEIGHT - 1 {
             for x in 0..BUFFER_WIDTH {
@@ -38,6 +39,7 @@ impl<'a> LineWriter<'a> {
         Ok(())
     }
 
+    /// Writes a string to the last line of the screen, shifting the buffer up if necessary.
     pub fn write(&mut self, string: &str) -> Result<(), DisplayError> {
         for c in string.chars() {
             if c == '\n' || self.cursor_position >= BUFFER_WIDTH {

@@ -9,6 +9,7 @@ use x86_64::{
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
+/// The Global Descriptor Table and its selectors.
 static GDT: Lazy<(GlobalDescriptorTable, Selectors)> = Lazy::new(|| {
     let mut gdt = GlobalDescriptorTable::new();
     let kernel_code_selector = gdt.append(Descriptor::kernel_code_segment());
@@ -26,12 +27,16 @@ static GDT: Lazy<(GlobalDescriptorTable, Selectors)> = Lazy::new(|| {
     )
 });
 
+/// merged struct for storing selectors to user code, kernel code, and the TSS.
+#[allow(dead_code)] // remove in future
 struct Selectors {
     kernel_code_selector: SegmentSelector,
     user_code_selector: SegmentSelector,
     tss_selector: SegmentSelector,
 }
 
+/// Initialize the Global Descriptor Table.
+/// Must be called before using any other GDT functions, such as setting up the TSS.
 pub fn init_gdt() {
     use x86_64::instructions::segmentation::Segment;
 
@@ -42,6 +47,7 @@ pub fn init_gdt() {
     }
 }
 
+/// Set up the Task State Segment (TSS) with an interrupt stack.
 static TSS: Lazy<TaskStateSegment> = Lazy::new(|| {
     let mut tss = TaskStateSegment::new();
     tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {

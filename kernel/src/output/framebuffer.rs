@@ -22,12 +22,14 @@ use embedded_graphics::{Pixel, pixelcolor::Rgb888, prelude::{
     DrawTarget, OriginDimensions, RgbColor
 }};
 
+/// Represents a position on the framebuffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
     pub x: usize,
     pub y: usize,
 }
 
+/// Represents a color in RGB format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
     pub red: u8,
@@ -65,7 +67,8 @@ pub fn set_pixel_in(framebuffer: &mut FrameBuffer, position: Position, color: Co
     }
 }
 
-/// Wrapper for framebuffer to implement DrawTarget. Only supports Rgb.
+/// Wrapper for framebuffer to implement DrawTarget. Only supports Rgb
+/// in the form of `Rgb888` provided by `embedded_graphics`.
 pub struct Display<'a> { framebuffer: &'a mut FrameBuffer }
 
 impl<'a> Display<'a> {
@@ -102,6 +105,7 @@ impl<'a> Display<'a> {
     }
 }
 
+/// Makes the framebuffer a DrawTarget for `embedded_graphics`.
 impl DrawTarget for Display<'_> {
     type Color = Rgb888;
 
@@ -116,6 +120,7 @@ impl DrawTarget for Display<'_> {
     }
 } 
 
+/// Allows `embedded_graphics` to get the dimensions of the framebuffer.
 impl OriginDimensions for Display<'_> {
     fn size(&self) -> embedded_graphics::prelude::Size {
         let info = self.framebuffer.info();
