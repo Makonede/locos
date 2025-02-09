@@ -41,7 +41,6 @@ use gdt::init_gdt;
 use interrupts::init_idt;
 use output::{Display, DisplayWriter, LineWriter};
 use spin::mutex::Mutex;
-use x86_64::{structures::paging::Translate, VirtAddr};
 
 pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
 
