@@ -18,20 +18,30 @@ You should have received a copy of the GNU General Public License along with loc
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
+pub mod gdt;
+pub mod interrupts;
+pub mod memory;
 pub mod output;
 pub mod serial;
-pub mod interrupts;
-pub mod gdt;
 
 use core::panic::PanicInfo;
 
-use bootloader_api::{entry_point, info::{FrameBuffer, FrameBufferInfo}, BootInfo};
+use bootloader_api::{
+    BootInfo, BootloaderConfig,
+    config::Mapping,
+    entry_point,
+    info::{FrameBuffer, FrameBufferInfo},
+};
 use conquer_once::spin::OnceCell;
+use embedded_graphics::{
+    mono_font::{MonoFont, MonoTextStyleBuilder},
+    pixelcolor::Rgb888,
+};
 use gdt::init_gdt;
 use interrupts::init_idt;
-use spin::mutex::Mutex;
-use embedded_graphics::{mono_font::{MonoFont, MonoTextStyleBuilder}, pixelcolor::Rgb888};
 use output::{Display, DisplayWriter, LineWriter};
+use spin::mutex::Mutex;
+use x86_64::{structures::paging::Translate, VirtAddr};
 
 pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
 
@@ -81,7 +91,6 @@ macro_rules! println {
     };
 }
 
-
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     init_gdt();
     init_idt();
@@ -89,33 +98,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let framebuffer = framebuffer_option.as_mut().unwrap();
     let framebuffer_info = framebuffer.info();
     init_writer(framebuffer, framebuffer_info);
-    // WRITER.init_once(|| Mutex::new(linewriter));
 
-    //init_writer(framebuffer);
-    let lines = [
-        "Linewriters are cool.",
-        "Hello, World!",
-        "Hello, Universe!",
-        "This is a short line.",
-        "This is a long line that should.................................................................... be wrapped around to the next line.",
-    ];
-
-    for line in lines.iter() {
-        println!("{}", line);
-    }
-    x86_64::instructions::interrupts::int3();
-    
-    fn stack_overflow() {
-        stack_overflow();
-    }
-
-    stack_overflow();
-
-    panic!("something happened! panic!");
     loop {}
 }
 
-entry_point!(kernel_main);
+pub static BOOTLOADER_CONFIG: BootloaderConfig = {
+    let mut config = BootloaderConfig::new_default();
+    config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config
+};
+
+entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
