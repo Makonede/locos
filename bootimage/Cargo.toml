@@ -1,16 +1,16 @@
 [package]
-name = 'locos'
+name = 'bootimage'
 version = '0.1.0'
 edition = '2024'
 authors = ['Mako', 'JayAndJef']
-default-run = 'locos'
 
-[workspace]
-members = ['kernel']
+[[bin]]
+name = 'bootimage'
+path = 'src/main.rs'
 
 [dependencies]
 ovmf-prebuilt = '=0.1.0-alpha.1'
 
 [build-dependencies]
-kernel = { path = 'kernel', artifact = 'bin', target = 'x86_64-unknown-none' }
 bootloader = { git = 'https://github.com/rust-osdev/bootloader.git' }
+kernel = { path = "../kernel", target = "x86_64-unknown-none" }

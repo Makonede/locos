@@ -6,6 +6,7 @@ authors = ['Mako', 'JayAndJef']
 
 [[bin]]
 name = 'kernel'
+path = "src/main.rs"
 test = false
 bench = false
 
