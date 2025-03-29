@@ -13,4 +13,4 @@ ovmf-prebuilt = '=0.1.0-alpha.1'
 
 [build-dependencies]
 bootloader = { git = 'https://github.com/rust-osdev/bootloader.git' }
-kernel = { path = "../kernel", target = "x86_64-unknown-none" }
+kernel = { path = "../kernel", target = "x86_64-unknown-none", artifact = "bin"}
