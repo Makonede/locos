@@ -27,13 +27,13 @@ jobs:
       run: make bootimage
 
     - name: Upload uefi image artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: uefi-image
         path: bootimage/target/debug/uefi.img
     
     - name: Upload bios image artifact
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v4
       with:
         name: bios-image
         path: bootimage/target/debug/bios.img
