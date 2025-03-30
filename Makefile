@@ -8,7 +8,7 @@ kernel:
 	cd kernel && cargo build --target x86_64-unknown-none
 
 bootimage: kernel
-	cd bootimage && cargo run
+	cd bootimage && cargo run --bin bootimage
 
 run-bios: all
 	cd bootimage && cargo run --bin qemu-bios
