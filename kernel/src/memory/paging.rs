@@ -21,14 +21,14 @@ impl BootInfoFrameAllocator {
 
     /// Returns an iterator over the usable frames specified in the memory map.
     fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
-        let usable_reigons = self.memory_map.iter().filter(
-            |reigon|
-            matches!(reigon.kind, MemoryRegionKind::Usable)
+        let usable_regions = self.memory_map.iter().filter(
+            |region|
+            matches!(region.kind, MemoryRegionKind::Usable)
         );
     
-        usable_reigons
-            .map(|reigon| reigon.start..reigon.end)
-            .flat_map(|reigon_range| reigon_range.step_by(4096))
+        usable_regions
+            .map(|region| region.start..region.end)
+            .flat_map(|region_range| region_range.step_by(4096))
             .map(|frame| PhysFrame::containing_address(x86_64::PhysAddr::new(frame)))
     }
 }
