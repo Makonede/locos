@@ -1,11 +1,9 @@
-# Makefile for locOS
-
 .PHONY: all kernel bootimage run-bios run-uefi clean
 
 all: kernel bootimage
 
 kernel:
-	cd kernel && cargo build --target x86_64-unknown-none
+	cd kernel && cargo build
 
 bootimage: kernel
 	cd bootimage && cargo run --bin bootimage
