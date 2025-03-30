@@ -71,10 +71,11 @@ dependencies = [
 [[package]]
 name = "bootloader"
 version = "0.11.10"
-source = "git+https://github.com/rust-osdev/bootloader.git#3cb6e6f6291ab4fcb63286e15aeca2ac0a0d3e70"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "718ebb60a92a2e37f9c6c6ab26f0adfd117aa6f1a8cd08d07bbd5a7762ff0812"
 dependencies = [
  "anyhow",
- "bootloader-boot-config 0.11.10 (git+https://github.com/rust-osdev/bootloader.git)",
+ "bootloader-boot-config",
  "fatfs",
  "gpt",
  "llvm-tools",
@@ -93,20 +94,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "bootloader-boot-config"
-version = "0.11.10"
-source = "git+https://github.com/rust-osdev/bootloader.git#3cb6e6f6291ab4fcb63286e15aeca2ac0a0d3e70"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "bootloader-x86_64-common"
 version = "0.11.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "852ffb13d08a29cd9d3b73061905bb43680de52b339aaed75a8f039b3a38269d"
 dependencies = [
- "bootloader-boot-config 0.11.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "bootloader-boot-config",
  "bootloader_api",
  "conquer-once 0.3.2",
  "log",
