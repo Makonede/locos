@@ -105,6 +105,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let framebuffer_info = framebuffer.info();
     init_writer(framebuffer, framebuffer_info);
 
+    serial_println!("kernel initialized");
+
     loop {}
 }
 
