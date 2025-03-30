@@ -14,7 +14,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+    
+    - name: Install Rust nightly
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        targets: x86_64-unknown-none
+        
+    - name: Build kernel
+      run: make kernel
+      
+    - name: Build bootimage
+      run: make bootimage
+
+    - name: Upload uefi image artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: uefi-image
+        path: bootimage/target/debug/uefi.img
+    
+    - name: Upload bios image artifact
+      uses: actions/upload-artifact@v2
+      with:
+        name: bios-image
+        path: bootimage/target/debug/bios.img
+        
