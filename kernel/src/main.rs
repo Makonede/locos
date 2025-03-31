@@ -24,6 +24,8 @@ pub mod memory;
 pub mod output;
 pub mod serial;
 
+extern crate alloc;
+
 use core::panic::PanicInfo;
 
 use bootloader_api::{
@@ -39,9 +41,11 @@ use embedded_graphics::{
 };
 use gdt::init_gdt;
 use interrupts::init_idt;
-use memory::BootInfoFrameAllocator;
+use memory::{init_heap, paging, BootInfoFrameAllocator};
 use output::{Display, DisplayWriter, LineWriter};
 use spin::mutex::Mutex;
+use alloc::{boxed::Box, vec::{self, Vec}};
+use x86_64::VirtAddr;
 
 pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
 
@@ -97,15 +101,27 @@ macro_rules! println {
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     init_gdt();
     init_idt();
-    let _frame_allocator = unsafe {
+    let mut frame_allocator = unsafe {
         BootInfoFrameAllocator::init(&boot_info.memory_regions)
     };
+
+    let mut offset_allocator = unsafe {
+        paging::init(VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap()))
+    };
+
+    unsafe {
+        init_heap(&mut offset_allocator, &mut frame_allocator).expect("heap initialization failed");
+    }
+
     let framebuffer_option = &mut boot_info.framebuffer;
     let framebuffer = framebuffer_option.as_mut().unwrap();
     let framebuffer_info = framebuffer.info();
     init_writer(framebuffer, framebuffer_info);
 
-    serial_println!("kernel initialized");
+    for i in 0..10000 {
+        let mut pointer = Box::new(i);
+        serial_println!("Boxed value: {}", *pointer);
+    }
 
     loop {}
 }
