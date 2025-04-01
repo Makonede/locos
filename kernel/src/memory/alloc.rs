@@ -128,10 +128,12 @@ impl FreeList {
         }
     }
 
+    #[expect(unused)]
     pub const fn len(&self) -> usize {
         self.len
     }
 
+    #[expect(unused)]
     pub const fn is_empty(&self) -> bool {
         self.head.is_none()
     }
@@ -183,6 +185,7 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
     }
 
     /// Converts a block index to a pointer to the start of the block
+    #[expect(unused)]
     const fn block_ptr(&self, level: usize, index: usize) -> NonNull<()> {
         let block_size = Self::block_size(level);
         let addr = self.heap_start.as_u64() as usize + (index * block_size);
@@ -242,13 +245,12 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
             return None;
         }
 
-        self.get_free_block(level - 1).map(|block| {
+        self.get_free_block(level - 1).inspect(|block| {
             let block_size = Self::block_size(level);
             let buddy = (block.as_ptr() as usize) ^ block_size;
             let buddy_ptr = NonNull::new(buddy as *mut ()).unwrap();
 
             self.free_lists[level].push(buddy_ptr);
-            block
         })
     }
 

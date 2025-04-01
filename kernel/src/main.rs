@@ -44,7 +44,7 @@ use interrupts::init_idt;
 use memory::{init_heap, paging, BootInfoFrameAllocator};
 use output::{Display, DisplayWriter, LineWriter};
 use spin::mutex::Mutex;
-use alloc::{boxed::Box, vec::{self, Vec}};
+use alloc::boxed::Box;
 use x86_64::VirtAddr;
 
 pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
@@ -119,7 +119,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     init_writer(framebuffer, framebuffer_info);
 
     for i in 0..10000 {
-        let mut pointer = Box::new(i);
+        let pointer = Box::new(i);
         serial_println!("Boxed value: {}", *pointer);
     }
 
