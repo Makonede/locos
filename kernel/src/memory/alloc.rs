@@ -285,7 +285,7 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
         let buddy_nonnull = NonNull::new(buddy as *mut ()).unwrap();
 
         
-        if self.free_lists[level].exists(buddy_nonnull) && self.free_lists[level].exists(ptr) {
+        if self.free_lists[level].exists(buddy_nonnull) {
             // remove buddies from the free list
             self.free_lists[level].remove(buddy_nonnull);
             self.free_lists[level].remove(ptr);
@@ -295,6 +295,8 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
             self.free_lists[level - 1].push(first_buddy);
 
             self.merge_buddies(level - 1, NonNull::new((ptr.as_ptr() as usize & !block_size) as *mut ()).unwrap());
+        } else {
+            self.free_lists[level].push(ptr);
         }
     }
 }
@@ -334,7 +336,6 @@ unsafe impl<const L: usize, const S: usize, const N: usize> GlobalAlloc
             None => return,
         };
 
-        inner.free_lists[level].push(NonNull::new(ptr as *mut ()).unwrap());
         inner.merge_buddies(level, NonNull::new(ptr as *mut ()).unwrap());
     }
 }
