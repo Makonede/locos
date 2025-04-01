@@ -62,6 +62,11 @@ impl<A> Locked<A> {
     }
 }
 
+/// A linked list of free memory blocks used in the buddy allocator
+///
+/// Each list tracks available blocks of a specific size, with nodes storing
+/// only the next pointer to minimize overhead. The list is manipulated through
+/// synchronized mutex access in the buddy allocator.
 #[derive(Clone, Copy, Debug)]
 struct FreeList {
     head: Option<NonNull<Node>>,
@@ -73,6 +78,7 @@ impl FreeList {
         FreeList { head: None, len: 0 }
     }
 
+    /// Pushes a new block onto the free list
     pub const fn push(&mut self, ptr: NonNull<()>) {
         let node = ptr.cast::<Node>();
         unsafe {
@@ -82,6 +88,7 @@ impl FreeList {
         self.len += 1;
     }
 
+    /// Pops a block from the free list
     pub const fn pop(&mut self) -> Option<NonNull<()>> {
         if let Some(node) = self.head {
             self.head = unsafe { node.as_ref().next };
@@ -92,6 +99,9 @@ impl FreeList {
         }
     }
 
+    /// Checks if a block is in the free list 
+    /// 
+    /// This method takes O(n) time
     pub fn exists(&self, ptr: NonNull<()>) -> bool {
         let mut current = self.head;
 
@@ -106,6 +116,9 @@ impl FreeList {
         false
     }
 
+    /// Removes a block from the free list
+    /// 
+    /// This method takes O(n) time
     pub fn remove(&mut self, ptr: NonNull<()>) {
         let mut current = self.head;
         let mut prev: Option<NonNull<Node>> = None;
@@ -139,6 +152,10 @@ impl FreeList {
     }
 }
 
+/// A node in the free list containing just a next pointer
+///
+/// Nodes are embedded directly in the free memory blocks they represent,
+/// allowing the memory to be reused when allocated.
 #[derive(Clone, Copy, Debug)]
 struct Node {
     next: Option<NonNull<Node>>,
