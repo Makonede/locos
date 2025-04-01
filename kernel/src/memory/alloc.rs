@@ -277,6 +277,7 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
     /// larger blocks when possible
     fn merge_buddies(&mut self, level: usize, ptr: NonNull<()>) {
         if level == 0 {
+            self.free_lists[level].push(ptr);
             return;
         }
 
@@ -288,13 +289,11 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
         if self.free_lists[level].exists(buddy_nonnull) {
             // remove buddies from the free list
             self.free_lists[level].remove(buddy_nonnull);
-            self.free_lists[level].remove(ptr);
 
             // add merged block to next level
             let first_buddy = core::cmp::min(ptr, buddy_nonnull);
-            self.free_lists[level - 1].push(first_buddy);
 
-            self.merge_buddies(level - 1, NonNull::new((ptr.as_ptr() as usize & !block_size) as *mut ()).unwrap());
+            self.merge_buddies(level - 1, first_buddy);
         } else {
             self.free_lists[level].push(ptr);
         }
