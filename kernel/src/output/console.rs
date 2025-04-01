@@ -114,7 +114,7 @@ impl<'a> DisplayWriter<'a> {
         }
     }
 
-    /// Flushes the buffer at point to the framebuffer.
+    /// Flushes the buffer at point to the double buffer.
     pub fn flush_buffer_at_point(
         &mut self,
         offset_y: usize,
@@ -156,6 +156,11 @@ impl<'a> DisplayWriter<'a> {
         self.buffer[offset_y][offset_x] = character;
         self.flush_buffer_at_point(offset_y, offset_x)?;
         Ok(())
+    }
+
+    /// Flushes the buffer to the framebuffer.
+    pub fn flush(&mut self) {
+        self.display.flush();
     }
 
     /// Writes a string to the buffer at the specified coordinates, wrapping if necessary.

@@ -17,7 +17,8 @@ You should have received a copy of the GNU General Public License along with loc
 
 use core::convert::Infallible;
 
-use bootloader_api::info::{FrameBuffer, PixelFormat};
+use alloc::vec::Vec;
+use bootloader_api::info::{FrameBuffer, FrameBufferInfo, PixelFormat};
 use embedded_graphics::{Pixel, pixelcolor::Rgb888, prelude::{
     DrawTarget, OriginDimensions, RgbColor
 }};
@@ -37,8 +38,36 @@ pub struct Color {
     pub blue: u8,
 }
 
+
+pub struct WrappedFrameBuffer<'a> {
+    framebuffer: &'a mut FrameBuffer,
+    double_buffer: Vec<u8>,
+}
+
+impl<'a> WrappedFrameBuffer<'a> {
+    pub fn new(framebuffer: &'a mut FrameBuffer) -> Self {
+        let double_buffer = framebuffer.buffer().to_vec();
+        Self { framebuffer, double_buffer }
+    }
+
+    /// Flushes the double buffer to the framebuffer.
+    pub fn flush(&mut self) {
+        self.framebuffer.buffer_mut().copy_from_slice(&self.double_buffer);
+    }
+
+    /// Get a mutable referance to the double buffer.
+    pub fn buffer_mut(&mut self) -> &mut [u8] {
+        &mut self.double_buffer
+    }
+
+    /// Get the intermal framebuffer info.
+    pub fn info(&self) -> FrameBufferInfo {
+        self.framebuffer.info()
+    }
+}
+
 /// Draw a pixel to the framebuffer in a certain position, accounting for alignment.
-pub fn set_pixel_in(framebuffer: &mut FrameBuffer, position: Position, color: Color) {
+pub fn set_pixel_in(framebuffer: &mut WrappedFrameBuffer, position: Position, color: Color) {
     let info = framebuffer.info();
 
     let byte_offset = {
@@ -69,10 +98,10 @@ pub fn set_pixel_in(framebuffer: &mut FrameBuffer, position: Position, color: Co
 
 /// Wrapper for framebuffer to implement DrawTarget. Only supports Rgb
 /// in the form of `Rgb888` provided by `embedded_graphics`.
-pub struct Display<'a> { framebuffer: &'a mut FrameBuffer }
+pub struct Display<'a> { framebuffer: &'a mut WrappedFrameBuffer<'a> }
 
 impl<'a> Display<'a> {
-    pub fn new(framebuffer: &'a mut FrameBuffer) -> Self { Self { framebuffer } }
+    pub fn new(framebuffer: &'a mut WrappedFrameBuffer<'a>) -> Self { Self { framebuffer } }
 
     fn draw_pixel(&mut self, Pixel(coordinates, color): Pixel<Rgb888>) {
         let (width, height) = {
@@ -102,6 +131,11 @@ impl<'a> Display<'a> {
                 set_pixel_in(self.framebuffer, Position { x, y }, color);
             }
         }
+    }
+    
+    /// flushes the double buffer to the framebuffer.
+    pub fn flush(&mut self) {
+        self.framebuffer.flush();
     }
 }
 

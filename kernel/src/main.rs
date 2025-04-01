@@ -42,7 +42,7 @@ use embedded_graphics::{
 use gdt::init_gdt;
 use interrupts::init_idt;
 use memory::{init_heap, paging, BootInfoFrameAllocator};
-use output::{Display, DisplayWriter, LineWriter};
+use output::{framebuffer::WrappedFrameBuffer, Display, DisplayWriter, LineWriter};
 use spin::mutex::Mutex;
 use alloc::boxed::Box;
 use x86_64::VirtAddr;
@@ -57,7 +57,9 @@ pub fn init_font(info: FrameBufferInfo) {
 
 /// Initializes the global display writer.
 pub fn init_writer(framebuffer: &'static mut FrameBuffer, info: FrameBufferInfo) {
-    let display = Display::new(framebuffer);
+    let wrapped_buffer = Box::new(WrappedFrameBuffer::new(framebuffer));
+    let wrapped_buffer: &'static mut WrappedFrameBuffer = Box::leak(wrapped_buffer);
+    let display = Display::new(wrapped_buffer);
     init_font(info);
     let displaywriter = DisplayWriter::new(
         display,
@@ -78,7 +80,10 @@ macro_rules! print {
         {
             use core::fmt::Write;
             use $crate::WRITER;
-            let _ = write!(WRITER.lock().as_mut().unwrap(), $($arg)*);
+            let mut lock = WRITER.lock();
+            let writer = lock.as_mut().unwrap();
+            let _ = write!(writer, $($arg)*);
+            writer.flush();
         }
     };
 }
@@ -118,9 +123,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     let framebuffer_info = framebuffer.info();
     init_writer(framebuffer, framebuffer_info);
 
-    for i in 0..10000 {
-        let pointer = Box::new(i);
-        serial_println!("Boxed value: {}", *pointer);
+    for i in 0..100 {
+        println!("Hello, world! {}", i);
     }
 
     loop {}

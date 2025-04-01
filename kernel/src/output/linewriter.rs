@@ -57,6 +57,11 @@ impl<'a> LineWriter<'a> {
 
         Ok(())
     }
+
+    /// FLushes the buffer to the screen.
+    pub fn flush(&mut self) {
+        self.displaywriter.flush()
+    }
 }
 
 impl Write for LineWriter<'_> {

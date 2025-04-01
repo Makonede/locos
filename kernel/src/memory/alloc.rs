@@ -10,13 +10,13 @@ use x86_64::{
 };
 
 #[global_allocator]
-pub static ALLOCATOR: Locked<BuddyAlloc<14, 16, 8192>> = Locked::new(BuddyAlloc::new(
+pub static ALLOCATOR: Locked<BuddyAlloc<20, 16, 524288>> = Locked::new(BuddyAlloc::new(
     VirtAddr::new(HEAP_START as u64),
     VirtAddr::new(HEAP_START as u64 + HEAP_SIZE as u64),
 ));
 
 pub const HEAP_START: usize = 0x_4444_0000_0000;
-pub const HEAP_SIZE: usize = 128 * 1024; // 128 KiB
+pub const HEAP_SIZE: usize = 8 * 1024 * 1024; // 8 MiB
 
 /// Initialize a heap region in virtual memory and map it to physical frames
 ///
