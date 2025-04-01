@@ -1,6 +1,6 @@
 extern crate alloc;
 
-use core::alloc::GlobalAlloc;
+use core::{alloc::GlobalAlloc, ptr::NonNull};
 
 use x86_64::{
     VirtAddr,
@@ -62,6 +62,91 @@ impl<A> Locked<A> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct FreeList {
+    head: Option<NonNull<Node>>,
+    len: usize,
+}
+
+impl FreeList {
+    pub const fn new() -> Self {
+        FreeList { head: None, len: 0 }
+    }
+
+    pub const fn push(&mut self, ptr: NonNull<()>) {
+        let node = ptr.cast::<Node>();
+        unsafe {
+            node.write(Node { next: self.head });
+        }
+        self.head = Some(node);
+        self.len += 1;
+    }
+
+    pub const fn pop(&mut self) -> Option<NonNull<()>> {
+        if let Some(node) = self.head {
+            self.head = unsafe { node.as_ref().next };
+            self.len -= 1;
+            Some(node.cast())
+        } else {
+            None
+        }
+    }
+
+    pub fn exists(&self, ptr: NonNull<()>) -> bool {
+        let mut current = self.head;
+
+        while let Some(node) = current {
+            if node == ptr.cast::<Node>() {
+                return true;
+            }
+
+            current = unsafe { node.as_ref().next };
+        }
+
+        false
+    }
+
+    pub fn remove(&mut self, ptr: NonNull<()>) {
+        let mut current = self.head;
+        let mut prev: Option<NonNull<Node>> = None;
+
+        while let Some(node) = current {
+            if node == ptr.cast::<Node>() {
+                if let Some(mut prev) = prev {
+                    unsafe {
+                        prev.as_mut().next = node.as_ref().next;
+                    }
+                } else {
+                    self.head = unsafe { node.as_ref().next };
+                }
+                self.len -= 1;
+                return;
+            }
+
+            prev = current;
+            current = unsafe { node.as_ref().next };
+        }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.head.is_none()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Node {
+    next: Option<NonNull<Node>>,
+}
+
+// Safety: Node contains only a NonNull pointer which is used exclusively
+// through synchronized mutex access in BuddyAlloc's implementation
+unsafe impl Send for Node {}
+unsafe impl Sync for Node {}
+
 /// A buddy allocator for managing heap memory allocations
 ///
 /// The buddy allocator splits memory into power-of-two sized blocks, making it
@@ -78,14 +163,30 @@ impl<A> Locked<A> {
 pub struct BuddyAlloc<const L: usize, const S: usize, const N: usize> {
     heap_start: VirtAddr,
     _heap_end: VirtAddr,
-    free_lists: [[usize; N]; L],
-    counts: [usize; L],
+    free_lists: [FreeList; L],
 }
+
+// Safety: All access to internal data structures is protected by a Mutex
+// in the Locked wrapper, ensuring thread-safe access to the allocator
+unsafe impl<const L: usize, const S: usize, const N: usize> Send for BuddyAlloc<L, S, N> {}
+unsafe impl<const L: usize, const S: usize, const N: usize> Sync for BuddyAlloc<L, S, N> {}
 
 impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
     /// Returns the maximum block size handled by this allocator
-    fn max_size() -> usize {
+    const fn max_size() -> usize {
         S << (L - 1)
+    }
+
+    /// Returns the size of each block at a level
+    pub const fn block_size(level: usize) -> usize {
+        Self::max_size() >> level
+    }
+
+    /// Converts a block index to a pointer to the start of the block
+    const fn block_ptr(&self, level: usize, index: usize) -> NonNull<()> {
+        let block_size = Self::block_size(level);
+        let addr = self.heap_start.as_u64() as usize + (index * block_size);
+        NonNull::new(addr as *mut ()).unwrap()
     }
 
     /// Creates a new buddy allocator with the given heap bounds
@@ -94,28 +195,27 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
     /// * `heap_start` - Virtual address of the heap start
     /// * `heap_end` - Virtual address of the heap end
     pub const fn new(heap_start: VirtAddr, _heap_end: VirtAddr) -> Self {
-        let mut counts = [0; L];
-        counts[0] = 1; // one free block at top level
+        let mut free_lists: [FreeList; L] = [FreeList::new(); L];
+        free_lists[0].head = Some(NonNull::new(heap_start.as_u64() as *mut ()).unwrap().cast::<Node>());
+        free_lists[0].len = 1;
 
         Self {
             heap_start,
             _heap_end,
-            free_lists: [[0; N]; L],
-            counts,
+            free_lists,
         }
     }
 
     /// Determines the appropriate level for a requested allocation size
     ///
     /// Returns None if the requested size is larger than the maximum block size
-    fn get_level_from_size(&self, size: usize) -> Option<usize> {
-        let max_size = Self::max_size();
-        if size > max_size {
+    const fn get_level_from_size(&self, size: usize) -> Option<usize> {
+        if size > Self::max_size() {
             return None;
         }
 
         let mut level = 1;
-        while (max_size >> level) >= size && level < L {
+        while (Self::block_size(level)) >= size && level < L {
             level += 1;
         }
 
@@ -126,11 +226,9 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
     ///
     /// If no blocks are available at the requested level, attempts to split
     /// a larger block from a higher level
-    fn get_free_block(&mut self, level: usize) -> Option<usize> {
-        if self.counts[level] != 0 {
-            let free_block = Some(self.free_lists[level][self.counts[level] - 1]);
-            self.counts[level] -= 1;
-            return free_block;
+    fn get_free_block(&mut self, level: usize) -> Option<NonNull<()>> {
+        if let Some(free_block) = self.free_lists[level].pop() {
+            return Some(free_block);
         }
         self.split_level(level)
     }
@@ -139,15 +237,18 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
     ///
     /// Returns the index of the first block if successful, None if no higher level blocks
     /// are available
-    fn split_level(&mut self, level: usize) -> Option<usize> {
+    fn split_level(&mut self, level: usize) -> Option<NonNull<()>> {
         if level == 0 {
             return None;
         }
 
         self.get_free_block(level - 1).map(|block| {
-            self.free_lists[level][self.counts[level]] = block * 2 + 1; // second block added to list
-            self.counts[level] += 1;
-            block * 2 // give first block
+            let block_size = Self::block_size(level);
+            let buddy = (block.as_ptr() as usize) ^ block_size;
+            let buddy_ptr = NonNull::new(buddy as *mut ()).unwrap();
+
+            self.free_lists[level].push(buddy_ptr);
+            block
         })
     }
 
@@ -155,29 +256,26 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
     ///
     /// This helps prevent fragmentation by recombining adjacent free blocks into
     /// larger blocks when possible
-    fn merge_buddies(&mut self, level: usize, block: usize) {
+    fn merge_buddies(&mut self, level: usize, ptr: NonNull<()>) {
         if level == 0 {
             return;
         }
 
-        let buddy = block ^ 1;
+        let block_size = Self::block_size(level);
+        let buddy = ptr.as_ptr() as usize ^ block_size;
+        let buddy_nonnull = NonNull::new(buddy as *mut ()).unwrap();
 
-        if let Some(index) = self.free_lists[level]
-            .iter()
-            .take(self.counts[level])
-            .position(|&x| x == buddy)
-        {
-            // merge the buddy
-            for i in index..self.counts[level] - 2 {
-                self.free_lists[level][i] = self.free_lists[level][i + 1];
-            }
-            self.counts[level] -= 2;
+        
+        if self.free_lists[level].exists(buddy_nonnull) && self.free_lists[level].exists(ptr) {
+            // remove buddies from the free list
+            self.free_lists[level].remove(buddy_nonnull);
+            self.free_lists[level].remove(ptr);
 
             // add merged block to next level
-            self.free_lists[level - 1][self.counts[level - 1]] = block / 2;
-            self.counts[level - 1] += 1;
+            let first_buddy = core::cmp::min(ptr, buddy_nonnull);
+            self.free_lists[level - 1].push(first_buddy);
 
-            self.merge_buddies(level - 1, block / 2);
+            self.merge_buddies(level - 1, NonNull::new((ptr.as_ptr() as usize & !block_size) as *mut ()).unwrap());
         }
     }
 }
@@ -206,10 +304,7 @@ unsafe impl<const L: usize, const S: usize, const N: usize> GlobalAlloc
             None => return core::ptr::null_mut(),
         };
 
-        let block_size = BuddyAlloc::<L, S, N>::max_size() >> level;
-        let addr = inner.heap_start.as_u64() as usize + (block * block_size);
-
-        addr as *mut u8
+        block.cast::<u8>().as_ptr()
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
@@ -220,14 +315,7 @@ unsafe impl<const L: usize, const S: usize, const N: usize> GlobalAlloc
             None => return,
         };
 
-        let offset = (ptr as usize) - inner.heap_start.as_u64() as usize;
-        let block_size = BuddyAlloc::<L, S, N>::max_size() >> level;
-        let block_index = offset / block_size;
-
-        let last_free = inner.counts[level];
-        inner.free_lists[level][last_free] = block_index;
-        inner.counts[level] += 1;
-
-        inner.merge_buddies(level, block_index);
+        inner.free_lists[level].push(NonNull::new(ptr as *mut ()).unwrap());
+        inner.merge_buddies(level, NonNull::new(ptr as *mut ()).unwrap());
     }
 }
