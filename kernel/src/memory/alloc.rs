@@ -10,7 +10,7 @@ use x86_64::{
 };
 
 #[global_allocator]
-pub static ALLOCATOR: Locked<BuddyAlloc<20, 16, 524288>> = Locked::new(BuddyAlloc::new(
+pub static ALLOCATOR: Locked<BuddyAlloc<20, 16>> = Locked::new(BuddyAlloc::new(
     VirtAddr::new(HEAP_START as u64),
     VirtAddr::new(HEAP_START as u64 + HEAP_SIZE as u64),
 ));
@@ -174,12 +174,12 @@ unsafe impl Sync for Node {}
 /// # Type Parameters
 /// * `L`: Number of levels in the buddy system
 /// * `S`: Size of the smallest block in bytes
-/// * `N`: Maximum number of blocks at each level (fixed to avoid const generics)
 ///
 /// # Notes
-/// The allocator uses fixed-size arrays for free lists which trades some memory
-/// overhead for implementation simplicity and deterministic performance.
-pub struct BuddyAlloc<const L: usize, const S: usize, const N: usize> {
+/// * The allocator uses fixed-size arrays for free lists which trades some memory
+///   overhead for implementation simplicity and deterministic performance.
+/// * The number of possible blocks at the lowest level is 2^(L-1)
+pub struct BuddyAlloc<const L: usize, const S: usize> {
     heap_start: VirtAddr,
     _heap_end: VirtAddr,
     free_lists: [FreeList; L],
@@ -187,10 +187,16 @@ pub struct BuddyAlloc<const L: usize, const S: usize, const N: usize> {
 
 // Safety: All access to internal data structures is protected by a Mutex
 // in the Locked wrapper, ensuring thread-safe access to the allocator
-unsafe impl<const L: usize, const S: usize, const N: usize> Send for BuddyAlloc<L, S, N> {}
-unsafe impl<const L: usize, const S: usize, const N: usize> Sync for BuddyAlloc<L, S, N> {}
+unsafe impl<const L: usize, const S: usize> Send for BuddyAlloc<L, S> {}
+unsafe impl<const L: usize, const S: usize> Sync for BuddyAlloc<L, S> {}
 
-impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
+impl<const L: usize, const S: usize> BuddyAlloc<L, S> {
+    /// Returns the number of possible blocks at the lowest level
+    #[expect(unused)]
+    const fn max_blocks() -> usize {
+        1 << (L - 1)
+    }
+
     /// Returns the maximum block size handled by this allocator
     const fn max_size() -> usize {
         S << (L - 1)
@@ -307,8 +313,8 @@ impl<const L: usize, const S: usize, const N: usize> BuddyAlloc<L, S, N> {
 /// - Allocations are aligned to the requested alignment
 /// - Each allocated block is exclusive and doesn't overlap with other allocations
 /// - Deallocated blocks were previously allocated with the same layout
-unsafe impl<const L: usize, const S: usize, const N: usize> GlobalAlloc
-    for Locked<BuddyAlloc<L, S, N>>
+unsafe impl<const L: usize, const S: usize> GlobalAlloc
+    for Locked<BuddyAlloc<L, S>>
 {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         let mut inner = self.lock();
