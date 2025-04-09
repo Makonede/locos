@@ -55,12 +55,12 @@ impl<'a> WrappedFrameBuffer<'a> {
         self.framebuffer.buffer_mut().copy_from_slice(&self.double_buffer);
     }
 
-    /// Get a mutable referance to the double buffer.
+    /// Get a mutable reference to the double buffer.
     pub fn buffer_mut(&mut self) -> &mut [u8] {
         &mut self.double_buffer
     }
 
-    /// Get the intermal framebuffer info.
+    /// Get the internal framebuffer info.
     pub fn info(&self) -> FrameBufferInfo {
         self.framebuffer.info()
     }
