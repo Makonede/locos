@@ -1,5 +1,7 @@
 use core::fmt::Write;
 
+use alloc::vec;
+use alloc::vec::Vec;
 use embedded_graphics::pixelcolor::Rgb888;
 
 use crate::output::console::{DisplayError, DisplayWriter, ScreenChar};
@@ -21,41 +23,59 @@ impl<'a> LineWriter<'a> {
 
     /// Shifts the buffer up by one line, clearing the last.
     fn shift_buffer_up(&mut self) -> Result<(), DisplayError> {
+        let mut characters = Vec::new();
         for y in 0..self.displaywriter.buffer_height - 1 {
-            for x in 0..self.displaywriter.buffer_width {
-                self.displaywriter.write_char(
-                    y,
-                    x,
-                    self.displaywriter.buffer[(y + 1) * self.displaywriter.buffer_width + x],
-                )?;
-            }
+            characters.extend_from_slice(self.displaywriter.get_char_range(
+                y + 1,
+                0,
+                self.displaywriter.buffer_width,
+            ));
+
+            self.displaywriter.write_range(0, y, &characters)?;
+            characters.clear();
         }
 
-        for i in 0..self.displaywriter.buffer_width {
-            self.displaywriter.write_char(
-                self.displaywriter.buffer_height - 1,
-                i,
-                ScreenChar::new(' ', Rgb888::new(255, 255, 255)),
-            )?;
-        }
+        let blank_characters =
+            vec![ScreenChar::new(' ', Rgb888::new(255, 255, 255)); self.displaywriter.buffer_width];
+        self.displaywriter.write_range(
+            0,
+            self.displaywriter.buffer_height - 1,
+            &blank_characters,
+        )?;
 
         Ok(())
     }
 
     /// Writes a string to the last line of the screen, shifting the buffer up if necessary.
     pub fn write(&mut self, string: &str) -> Result<(), DisplayError> {
+        let mut curr_chars: Vec<ScreenChar> = Vec::new();
+
         for c in string.chars() {
             if c == '\n' || self.cursor_position >= self.displaywriter.buffer_width {
+                if !curr_chars.is_empty() {
+                    self.displaywriter.write_range(
+                        self.cursor_position - curr_chars.len(),
+                        self.displaywriter.buffer_height - 1,
+                        &curr_chars,
+                    )?;
+                }
+
                 self.shift_buffer_up()?;
                 self.cursor_position = 0;
+                curr_chars.clear();
                 continue;
             }
-            self.displaywriter.write_char(
-                self.displaywriter.buffer_height - 1,
-                self.cursor_position,
-                ScreenChar::new(c, Rgb888::new(255, 255, 255)),
-            )?;
+
+            curr_chars.push(ScreenChar::from_char(c));
             self.cursor_position += 1;
+        }
+
+        if !curr_chars.is_empty() {
+            self.displaywriter.write_range(
+                self.cursor_position - curr_chars.len(),
+                self.displaywriter.buffer_height - 1,
+                &curr_chars,
+            )?;
         }
 
         Ok(())

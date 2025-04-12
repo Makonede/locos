@@ -42,6 +42,13 @@ impl ScreenChar {
     pub fn new(character: char, color: Rgb888) -> Self {
         Self { character, color }
     }
+
+    pub fn from_char(character: char) -> Self {
+        Self {
+            character,
+            color: Rgb888::new(255, 255, 255),
+        }
+    }
 }
 
 /// Creates an array of `ScreenChar` from a string slice with a specified color.
@@ -73,6 +80,39 @@ macro_rules! screen_chars {
 pub enum DisplayError {
     OutOfBounds,
     DrawError,
+}
+#[derive(Debug, Clone, Copy)]
+pub struct Range {
+    pub start_x: usize,
+    pub start_y: usize,
+    pub height: usize,
+    pub width: usize,
+}
+
+impl Range {
+    pub fn new(start_x: usize, start_y: usize, height: usize, width: usize) -> Self {
+        Self {
+            start_x,
+            start_y,
+            height,
+            width,
+        }
+    }
+
+    pub fn from_1drange(range: OneDRange, offset_y: usize) -> Self {
+        Self {
+            start_x: range.start,
+            start_y: offset_y,
+            height: 1,
+            width: range.width,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OneDRange {
+    pub start: usize,
+    pub width: usize,
 }
 
 /// Manages writing characters to the display buffer and rendering them.
@@ -130,41 +170,59 @@ impl<'a> DisplayWriter<'a> {
         panic!("screen too small for any font");
     }
 
-    /// Flushes the buffer at point to the double buffer.
-    ///
-    /// If the character is a space, fill it with an empty rectangle
-    pub fn flush_buffer_at_point(
+    /// Flushes the buffer at a range using a single draw operation
+    pub fn flush_buffer_at_range(
         &mut self,
+        range: OneDRange,
         offset_y: usize,
-        offset_x: usize,
     ) -> Result<(), DisplayError> {
-        if offset_y > self.buffer_height || offset_x > self.buffer_width {
+        if range.start > self.buffer_width
+            || range.start + range.width > self.buffer_width
+            || offset_y > self.buffer_height
+        {
             return Err(DisplayError::OutOfBounds);
         }
 
-        let buffer_char = self.buffer[offset_y * self.buffer_width + offset_x];
+        self.clear_range(Range::from_1drange(range, offset_y))?;
 
-        // clear the space
-        self.clear_cell(offset_x, offset_y)?;
+        let start = offset_y * self.buffer_width + range.start;
+        let end = start + range.width;
 
-        // if the character is a space, we don't need to do anything else
-        if buffer_char.character == ' ' {
-            return Ok(());
+        for (i, char) in self.buffer[start..end].iter().enumerate() {
+            if char.character != ' ' {
+                let mut style = self.text_style;
+                style.text_color = Some(char.color);
+                let x = (range.start + i) * self.text_style.font.character_size.width as usize;
+                let y = offset_y * self.text_style.font.character_size.height as usize;
+                let mut buf = [0u8; 4];
+                Text::new(
+                    char.character.encode_utf8(&mut buf),
+                    Point::new(x as i32, y as i32),
+                    style,
+                )
+                .draw(&mut self.display)
+                .map_err(|_| DisplayError::DrawError)?;
+            }
         }
+        Ok(())
+    }
 
-        let style = {
-            let mut self_style = self.text_style;
-            self_style.text_color = Some(buffer_char.color);
-            self_style
-        };
-
-        let x_coords = offset_x * self.text_style.font.character_size.width as usize;
-        let y_coords = offset_y * self.text_style.font.character_size.height as usize;
-        let mut buf = [0u8; 4];
-        Text::new(
-            buffer_char.character.encode_utf8(&mut buf),
+    fn clear_range(&mut self, range: Range) -> Result<(), DisplayError> {
+        // draw one big rectangle
+        let x_coords = range.start_x * self.text_style.font.character_size.width as usize;
+        let y_coords = range.start_y * self.text_style.font.character_size.height as usize;
+        let rect = embedded_graphics::primitives::Rectangle::new(
             Point::new(x_coords as i32, y_coords as i32),
-            style,
+            Size::new(
+                range.width as u32 * self.text_style.font.character_size.width,
+                range.height as u32 * self.text_style.font.character_size.height,
+            ),
+        );
+
+        rect.into_styled(
+            embedded_graphics::primitives::PrimitiveStyleBuilder::new()
+                .fill_color(Rgb888::new(0, 0, 0))
+                .build(),
         )
         .draw(&mut self.display)
         .map_err(|_| DisplayError::DrawError)?;
@@ -172,65 +230,46 @@ impl<'a> DisplayWriter<'a> {
         Ok(())
     }
 
-    /// Clears a cell at the specified coordinates by filling it with a black rectangle.
-    fn clear_cell(&mut self, offset_x: usize, offset_y: usize) -> Result<(), DisplayError> {
-        let x_coords = offset_x * self.text_style.font.character_size.width as usize;
-        let y_coords = offset_y * self.text_style.font.character_size.height as usize;
-        let rect = embedded_graphics::primitives::Rectangle::new(
-            Point::new(x_coords as i32, y_coords as i32),
-            Size::new(
-                self.text_style.font.character_size.width,
-                self.text_style.font.character_size.height,
-            ),
-        );
-        rect.into_styled(
-            embedded_graphics::primitives::PrimitiveStyleBuilder::new()
-                .fill_color(Rgb888::new(0, 0, 0))
-                .build(),
-        )
-        .draw(&mut self.display)
-        .map_err(|_| DisplayError::DrawError)
+    /// Writes a string to the buffer at the specified range
+    pub fn write_range(
+        &mut self,
+        offset_x: usize,
+        offset_y: usize,
+        characters: &[ScreenChar],
+    ) -> Result<(), DisplayError> {
+        if offset_x + characters.len() > self.buffer_width {
+            return Err(DisplayError::OutOfBounds);
+        }
+
+        let start = offset_y * self.buffer_width + offset_x;
+        let end = start + characters.len();
+        self.buffer[start..end].copy_from_slice(characters);
+        self.flush_buffer_at_range(
+            OneDRange {
+                start: offset_x,
+                width: characters.len(),
+            },
+            offset_y,
+        )?;
+        Ok(())
     }
 
-    /// Writes a character to the buffer at the specified coordinates.
-    pub fn write_char(
-        &mut self,
-        offset_y: usize,
-        offset_x: usize,
-        character: ScreenChar,
-    ) -> Result<(), DisplayError> {
-        self.buffer[offset_y * self.buffer_width + offset_x] = character;
-        self.flush_buffer_at_point(offset_y, offset_x)?;
-        Ok(())
+    /// Get the character at a specific position in the buffer
+    ///
+    /// Panics if the coordinates are out of bounds.
+    pub fn get_char(&self, offset_y: usize, offset_x: usize) -> ScreenChar {
+        self.buffer[offset_y * self.buffer_width + offset_x]
+    }
+
+    /// Get char range at a specific range in the buffer
+    pub fn get_char_range(&self, offset_y: usize, offset_x: usize, width: usize) -> &[ScreenChar] {
+        let start = offset_y * self.buffer_width + offset_x;
+        let end = start + width;
+        &self.buffer[start..end]
     }
 
     /// Flushes the buffer to the framebuffer.
     pub fn flush(&mut self) {
         self.display.flush();
-    }
-
-    /// Writes a string to the buffer at the specified coordinates, wrapping if necessary.
-    #[deprecated(note = "Use LineWriter as a wrapper around DisplayWriter instead.")]
-    pub fn write_string(
-        &mut self,
-        offset_y: usize,
-        offset_x: usize,
-        characters: &[ScreenChar],
-    ) -> Result<(), DisplayError> {
-        let mut y = offset_y;
-        let mut x = offset_x;
-
-        for c in characters.iter() {
-            if x >= self.buffer_width {
-                y += 1;
-                x = 0;
-            }
-            if y >= self.buffer_height {
-                return Err(DisplayError::OutOfBounds);
-            }
-            self.write_char(y, x, *c)?;
-            x += 1;
-        }
-        Ok(())
     }
 }
