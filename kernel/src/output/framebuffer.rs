@@ -15,13 +15,15 @@ You should have received a copy of the GNU General Public License along with loc
 <https://www.gnu.org/licenses/>.
 */
 
-use core::convert::Infallible;
+use core::{convert::Infallible, panic};
 
 use alloc::vec::Vec;
 use bootloader_api::info::{FrameBuffer, FrameBufferInfo, PixelFormat};
-use embedded_graphics::{Pixel, pixelcolor::Rgb888, prelude::{
-    DrawTarget, OriginDimensions, RgbColor
-}};
+use embedded_graphics::{pixelcolor::Rgb888, prelude::{
+    Dimensions, DrawTarget, OriginDimensions, RgbColor
+}, primitives::Rectangle, Pixel};
+
+use crate::serial_println;
 
 /// Represents a position on the framebuffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,16 +68,20 @@ impl<'a> WrappedFrameBuffer<'a> {
     }
 }
 
+pub fn get_byte_offset(framebuffer: &WrappedFrameBuffer, position: Position) -> usize {
+    let info = framebuffer.info();
+
+    let line_offset = position.y * info.stride;
+    let pixel_offset = line_offset + position.x;
+
+    pixel_offset * info.bytes_per_pixel
+}
+
 /// Draw a pixel to the framebuffer in a certain position, accounting for alignment.
 pub fn set_pixel_in(framebuffer: &mut WrappedFrameBuffer, position: Position, color: Color) {
     let info = framebuffer.info();
 
-    let byte_offset = {
-        let line_offset = position.y * info.stride;
-        let pixel_offset = line_offset + position.x;
-
-        pixel_offset * info.bytes_per_pixel
-    };
+    let byte_offset = get_byte_offset(framebuffer, position);
 
     let pixel_buffer = &mut framebuffer.buffer_mut()[byte_offset..byte_offset+4];
     match info.pixel_format {
@@ -149,6 +155,54 @@ impl DrawTarget for Display<'_> {
     where
         I: IntoIterator<Item = Pixel<Self::Color>> {
         for pixel in pixels.into_iter() { self.draw_pixel(pixel); }
+
+        Ok(())
+    }
+
+    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+        where
+            I: IntoIterator<Item = Self::Color>, {
+
+
+        let area = area.intersection(&self.bounding_box());
+
+        if area.size.width == 0 || area.size.height == 0 {
+            return Ok(());
+        }
+
+        let info = self.framebuffer.info();
+        let buffer = self.framebuffer.buffer_mut();
+
+        let mut colors = colors.into_iter();
+        let (start_x, start_y) = (area.top_left.x as usize, area.top_left.y as usize);
+
+        let (width, height) = (area.size.width as usize, area.size.height as usize);
+
+        for y in 0..height {
+            let row_start = (start_y + y) * info.stride * info.bytes_per_pixel + start_x * info.bytes_per_pixel;
+            let row_end = row_start + width * info.bytes_per_pixel;
+
+            for (i, color) in (row_start..row_end)
+                .step_by(info.bytes_per_pixel)
+                .zip(&mut colors) {
+                match info.pixel_format {
+                    PixelFormat::Rgb => {
+                        buffer[i] = color.r();
+                        buffer[i + 1] = color.g();
+                        buffer[i + 2] = color.b();
+                    },
+                    PixelFormat::Bgr => {
+                        buffer[i] = color.b();
+                        buffer[i + 1] = color.g();
+                        buffer[i + 2] = color.r();
+                    },
+                    PixelFormat::U8 => {
+                        buffer[i] = color.r() / 3 + color.g() / 3 + color.b() / 3;
+                    },
+                    _ => panic!("Unsupported pixel format"),
+                }
+            }
+        }
 
         Ok(())
     }
