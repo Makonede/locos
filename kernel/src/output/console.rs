@@ -207,6 +207,20 @@ impl<'a> DisplayWriter<'a> {
         Ok(())
     }
 
+    /// flushes entire buffer to the double buffer.
+    /// 
+    /// uses `flush_buffer_at_range`
+    pub fn flush_entire_buffer(&mut self) -> Result<(), DisplayError> {
+        let range = OneDRange {
+            start: 0,
+            width: self.buffer_width,
+        };
+        for y in 0..self.buffer_height {
+            self.flush_buffer_at_range(range, y)?;
+        }
+        Ok(())
+    }
+
     fn clear_range(&mut self, range: Range) -> Result<(), DisplayError> {
         // draw one big rectangle
         let x_coords = range.start_x * self.text_style.font.character_size.width as usize;
@@ -231,6 +245,8 @@ impl<'a> DisplayWriter<'a> {
     }
 
     /// Writes a string to the buffer at the specified range
+    /// 
+    /// does not flush the buffer
     pub fn write_range(
         &mut self,
         offset_x: usize,
@@ -244,14 +260,21 @@ impl<'a> DisplayWriter<'a> {
         let start = offset_y * self.buffer_width + offset_x;
         let end = start + characters.len();
         self.buffer[start..end].copy_from_slice(characters);
-        self.flush_buffer_at_range(
-            OneDRange {
-                start: offset_x,
-                width: characters.len(),
-            },
-            offset_y,
-        )?;
         Ok(())
+    }
+
+    /// Flushes the buffer and writes a range of characters to the framebuffer
+    pub fn write_and_flush_range(
+        &mut self,
+        offset_x: usize,
+        offset_y: usize,
+        characters: &[ScreenChar],
+    ) -> Result<(), DisplayError> {
+        self.write_range(offset_x, offset_y, characters)?;
+        self.flush_buffer_at_range(OneDRange {
+            start: offset_x,
+            width: characters.len(),
+        }, offset_y)
     }
 
     /// Get the character at a specific position in the buffer

@@ -43,6 +43,8 @@ impl<'a> LineWriter<'a> {
             &blank_characters,
         )?;
 
+        self.displaywriter.flush_entire_buffer()?;
+
         Ok(())
     }
 
@@ -53,7 +55,7 @@ impl<'a> LineWriter<'a> {
         for c in string.chars() {
             if c == '\n' || self.cursor_position >= self.displaywriter.buffer_width {
                 if !curr_chars.is_empty() {
-                    self.displaywriter.write_range(
+                    self.displaywriter.write_and_flush_range(
                         self.cursor_position - curr_chars.len(),
                         self.displaywriter.buffer_height - 1,
                         &curr_chars,
@@ -71,7 +73,7 @@ impl<'a> LineWriter<'a> {
         }
 
         if !curr_chars.is_empty() {
-            self.displaywriter.write_range(
+            self.displaywriter.write_and_flush_range(
                 self.cursor_position - curr_chars.len(),
                 self.displaywriter.buffer_height - 1,
                 &curr_chars,

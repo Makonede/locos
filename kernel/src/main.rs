@@ -109,7 +109,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     init_writer(framebuffer, framebuffer_info);
 
     for i in 0..100 {
-        print!("Hello, world! {}", i);
+        println!("Hello, world! {}", i);
     }
 
     loop {}
