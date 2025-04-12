@@ -127,14 +127,25 @@ impl<'a> Display<'a> {
     }
 
     pub fn fill_display(&mut self, color: Rgb888) {
-        let color = Color { red: color.r(), green: color.g(), blue: color.b() };
         let info = self.framebuffer.info();
-        let width = info.width;
-        let height = info.height;
-
-        for y in 0..height {
-            for x in 0..width {
-                set_pixel_in(self.framebuffer, Position { x, y }, color);
+        let buffer = self.framebuffer.buffer_mut();
+        
+        for i in (0..buffer.len()).step_by(info.bytes_per_pixel) {
+            match info.pixel_format {
+                PixelFormat::Rgb => {
+                    buffer[i] = color.r();
+                    buffer[i + 1] = color.g();
+                    buffer[i + 2] = color.b();
+                },
+                PixelFormat::Bgr => {
+                    buffer[i] = color.b();
+                    buffer[i + 1] = color.g();
+                    buffer[i + 2] = color.r();
+                },
+                PixelFormat::U8 => {
+                    buffer[i] = color.r() / 3 + color.g() / 3 + color.b() / 3;
+                },
+                _ => panic!("Unsupported pixel format"),
             }
         }
     }
@@ -204,6 +215,11 @@ impl DrawTarget for Display<'_> {
             }
         }
 
+        Ok(())
+    }
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        self.fill_display(color);
         Ok(())
     }
 } 
