@@ -49,25 +49,20 @@ use x86_64::VirtAddr;
 
 pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
 
-static FONT: OnceCell<MonoFont> = OnceCell::uninit();
-
-pub fn init_font(info: FrameBufferInfo) {
-    FONT.init_once(|| DisplayWriter::select_font(info.height, info.width));
-}
-
 /// Initializes the global display writer.
+/// 
+/// In the future, all fonts might need to be present in order to allow for selection
 pub fn init_writer(framebuffer: &'static mut FrameBuffer, info: FrameBufferInfo) {
     let wrapped_buffer = Box::new(WrappedFrameBuffer::new(framebuffer));
     let wrapped_buffer: &'static mut WrappedFrameBuffer = Box::leak(wrapped_buffer);
     let display = Display::new(wrapped_buffer);
-    init_font(info);
+    let (font, width, height) = DisplayWriter::select_font_and_dimensions(info.height, info.width);
+    let font = Box::leak(Box::new(font));
     let displaywriter = DisplayWriter::new(
         display,
-        MonoTextStyleBuilder::new()
-            .font(FONT.get().unwrap())
-            .text_color(Rgb888::new(255, 255, 255))
-            .background_color(Rgb888::new(0, 0, 0)) // kind of hacky fix for non-overlapping text
-            .build(),
+        font,
+        width,
+        height,
     );
 
     *WRITER.lock() = Some(LineWriter::new(displaywriter));

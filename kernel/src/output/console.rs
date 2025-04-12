@@ -16,9 +16,11 @@ You should have received a copy of the GNU General Public License along with loc
 */
 
 use crate::output::framebuffer::Display;
-use embedded_graphics::{Drawable, mono_font::{MonoFont, MonoTextStyle, ascii::{
-    FONT_6X10, FONT_8X13, FONT_10X20
-}}, pixelcolor::Rgb888, prelude::Point, text::Text};
+use alloc::vec::Vec;
+use alloc::vec;
+use embedded_graphics::{mono_font::{ascii::{
+    FONT_10X20, FONT_6X10, FONT_8X13
+}, MonoFont, MonoTextStyle}, pixelcolor::Rgb888, prelude::{OriginDimensions, Point, Primitive, Size}, text::Text, Drawable};
 
 /// Represents a character and its color for console display.
 ///
@@ -61,9 +63,6 @@ macro_rules! screen_chars {
     }
 }
 
-pub const BUFFER_WIDTH: usize = 80;
-pub const BUFFER_HEIGHT: usize = 25;
-
 /// Represents errors that can occur during display operations.
 #[derive(Debug, Clone, Copy)]
 pub enum DisplayError {
@@ -78,53 +77,68 @@ pub enum DisplayError {
 /// uses the `embedded-graphics` crate for drawing operations.
 pub struct DisplayWriter<'a> {
     display: Display<'a>,
-    pub buffer: [[ScreenChar; BUFFER_WIDTH]; BUFFER_HEIGHT],
+    pub buffer: Vec<ScreenChar>,
+    pub buffer_width: usize,
+    pub buffer_height: usize,
     text_style: MonoTextStyle<'a, Rgb888>,
 }
 
 impl<'a> DisplayWriter<'a> {
-    pub fn new(display: Display<'a>, text_style: MonoTextStyle<'a, Rgb888>) -> Self {
-        let default_char = ScreenChar {
-            character: ' ',
-            color: Rgb888::new(255, 255, 255),
-        };
-
+    pub fn new(display: Display<'a>, font: &'a MonoFont<'a>, width: usize, height: usize) -> Self {
+        let default_char = ScreenChar::new(' ', Rgb888::new(255, 255, 255));
+        let buffer = vec![default_char; width * height];
+        
         Self {
             display,
-            buffer: [[default_char; BUFFER_WIDTH]; BUFFER_HEIGHT],
-            text_style,
+            buffer,
+            text_style: MonoTextStyle::new(&font, Rgb888::new(255, 255, 255)),
+            buffer_width: width,
+            buffer_height: height,
         }
+    }
+
+    /// Calculates the default buffer dimensions based on the display size and font.
+    fn calculate_buffer_dimensions(display_width: usize, display_height: usize, font: &MonoFont) -> (usize, usize) {
+        let buffer_width = display_width / font.character_size.width as usize;
+        let buffer_height = display_height / font.character_size.height as usize;
+        (buffer_width, buffer_height)
     }
 
     /// Selects a font based on the display height and width.
     /// Returns a static 'MonoFont'. Consider using a `OnceCell` or similar
     /// to store the font.
-    pub fn select_font(height: usize, width: usize) -> MonoFont<'static> {
-        let char_width = width / BUFFER_WIDTH;
-        let char_height = height / BUFFER_HEIGHT;
-
-        if char_width >= 10 && char_height >= 20 {
-            FONT_10X20
-        } else if char_width >= 8 && char_height >= 13 {
-            FONT_8X13
-        } else if char_width >= 6 && char_height >= 10 {
-            FONT_6X10
-        } else {
-            panic!("screen too small");
+    pub fn select_font_and_dimensions(display_height: usize, display_width: usize) -> (MonoFont<'static>, usize, usize) {
+        for font in [FONT_10X20, FONT_8X13, FONT_6X10] {
+            let (width, height) = Self::calculate_buffer_dimensions(display_width, display_height, &font);
+            if width > 0 && height > 0 {
+                return (font, width, height);
+            }
         }
+        panic!("screen too small for any font");
     }
 
     /// Flushes the buffer at point to the double buffer.
+    /// 
+    /// If the character is a space, fill it with an empty rectangle
     pub fn flush_buffer_at_point(
         &mut self,
         offset_y: usize,
         offset_x: usize,
     ) -> Result<(), DisplayError> {
-        if offset_y > BUFFER_HEIGHT || offset_x > BUFFER_WIDTH {
+        if offset_y > self.buffer_height || offset_x > self.buffer_width {
             return Err(DisplayError::OutOfBounds);
         }
 
-        let buffer_char = self.buffer[offset_y][offset_x];
+        let buffer_char = self.buffer[offset_y * self.buffer_width + offset_x];
+
+        // clear the space
+        self.clear_cell(offset_x, offset_y)?;
+
+        // if the character is a space, we don't need to do anything else
+        if buffer_char.character == ' ' {
+            return Ok(());
+        }
+
         let style = {
             let mut self_style = self.text_style;
             self_style.text_color = Some(buffer_char.color);
@@ -132,8 +146,7 @@ impl<'a> DisplayWriter<'a> {
         };
 
         let x_coords = offset_x * self.text_style.font.character_size.width as usize;
-        let y_coords = (offset_y * self.text_style.font.character_size.height as usize)
-            + self.text_style.font.character_size.height as usize;
+        let y_coords = offset_y * self.text_style.font.character_size.height as usize;
         let mut buf = [0u8; 4];
         Text::new(
             buffer_char.character.encode_utf8(&mut buf),
@@ -146,6 +159,24 @@ impl<'a> DisplayWriter<'a> {
         Ok(())
     }
 
+    /// Clears a cell at the specified coordinates by filling it with a black rectangle.
+    fn clear_cell(&mut self, offset_x: usize, offset_y: usize) -> Result<(), DisplayError> {
+        let x_coords = offset_x * self.text_style.font.character_size.width as usize;
+        let y_coords = offset_y * self.text_style.font.character_size.height as usize;
+        let rect = embedded_graphics::primitives::Rectangle::new(
+            Point::new(x_coords as i32, y_coords as i32),
+            Size::new(
+                self.text_style.font.character_size.width,
+                self.text_style.font.character_size.height,
+            ),
+        );
+        rect.into_styled(embedded_graphics::primitives::PrimitiveStyleBuilder::new()
+            .fill_color(Rgb888::new(0, 0, 0))
+            .build())
+        .draw(&mut self.display)
+        .map_err(|_| DisplayError::DrawError)
+    }
+
     /// Writes a character to the buffer at the specified coordinates.
     pub fn write_char(
         &mut self,
@@ -153,7 +184,7 @@ impl<'a> DisplayWriter<'a> {
         offset_x: usize,
         character: ScreenChar,
     ) -> Result<(), DisplayError> {
-        self.buffer[offset_y][offset_x] = character;
+        self.buffer[offset_y * self.buffer_width + offset_x] = character;
         self.flush_buffer_at_point(offset_y, offset_x)?;
         Ok(())
     }
@@ -175,11 +206,11 @@ impl<'a> DisplayWriter<'a> {
         let mut x = offset_x;
 
         for c in characters.iter() {
-            if x >= BUFFER_WIDTH {
+            if x >= self.buffer_width {
                 y += 1;
                 x = 0;
             }
-            if y >= BUFFER_HEIGHT {
+            if y >= self.buffer_height {
                 return Err(DisplayError::OutOfBounds);
             }
             self.write_char(y, x, *c)?;
