@@ -28,29 +28,24 @@ extern crate alloc;
 
 use core::panic::PanicInfo;
 
+use alloc::boxed::Box;
 use bootloader_api::{
     BootInfo, BootloaderConfig,
     config::Mapping,
     entry_point,
     info::{FrameBuffer, FrameBufferInfo},
 };
-use conquer_once::spin::OnceCell;
-use embedded_graphics::{
-    mono_font::{MonoFont, MonoTextStyleBuilder},
-    pixelcolor::Rgb888,
-};
 use gdt::init_gdt;
 use interrupts::init_idt;
-use memory::{init_heap, paging, BootInfoFrameAllocator};
-use output::{framebuffer::WrappedFrameBuffer, Display, DisplayWriter, LineWriter};
+use memory::{BootInfoFrameAllocator, init_heap, paging};
+use output::{Display, DisplayWriter, LineWriter, framebuffer::WrappedFrameBuffer};
 use spin::mutex::Mutex;
-use alloc::boxed::Box;
 use x86_64::VirtAddr;
 
 pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
 
 /// Initializes the global display writer.
-/// 
+///
 /// In the future, all fonts might need to be present in order to allow for selection
 pub fn init_writer(framebuffer: &'static mut FrameBuffer, info: FrameBufferInfo) {
     let wrapped_buffer = Box::new(WrappedFrameBuffer::new(framebuffer));
@@ -58,12 +53,7 @@ pub fn init_writer(framebuffer: &'static mut FrameBuffer, info: FrameBufferInfo)
     let display = Display::new(wrapped_buffer);
     let (font, width, height) = DisplayWriter::select_font_and_dimensions(info.height, info.width);
     let font = Box::leak(Box::new(font));
-    let displaywriter = DisplayWriter::new(
-        display,
-        font,
-        width,
-        height,
-    );
+    let displaywriter = DisplayWriter::new(display, font, width, height);
 
     *WRITER.lock() = Some(LineWriter::new(displaywriter));
 }
@@ -101,12 +91,12 @@ macro_rules! println {
 fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     init_gdt();
     init_idt();
-    let mut frame_allocator = unsafe {
-        BootInfoFrameAllocator::init(&boot_info.memory_regions)
-    };
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
     let mut offset_allocator = unsafe {
-        paging::init(VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap()))
+        paging::init(VirtAddr::new(
+            boot_info.physical_memory_offset.into_option().unwrap(),
+        ))
     };
 
     unsafe {

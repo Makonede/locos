@@ -1,7 +1,6 @@
-use uart_16550::SerialPort;
 use conquer_once::spin::Lazy;
 use spin::Mutex;
-
+use uart_16550::SerialPort;
 
 /// Serial port for writing to the serial interface in QEMU.
 pub static SERIAL1: Lazy<Mutex<SerialPort>> = Lazy::new(|| {

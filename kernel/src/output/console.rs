@@ -16,11 +16,18 @@ You should have received a copy of the GNU General Public License along with loc
 */
 
 use crate::output::framebuffer::Display;
-use alloc::vec::Vec;
 use alloc::vec;
-use embedded_graphics::{mono_font::{ascii::{
-    FONT_10X20, FONT_6X10, FONT_8X13
-}, MonoFont, MonoTextStyle}, pixelcolor::Rgb888, prelude::{OriginDimensions, Point, Primitive, Size}, text::Text, Drawable};
+use alloc::vec::Vec;
+use embedded_graphics::{
+    Drawable,
+    mono_font::{
+        MonoFont, MonoTextStyle,
+        ascii::{FONT_6X10, FONT_8X13, FONT_10X20},
+    },
+    pixelcolor::Rgb888,
+    prelude::{Point, Primitive, Size},
+    text::Text,
+};
 
 /// Represents a character and its color for console display.
 ///
@@ -49,18 +56,16 @@ impl ScreenChar {
 /// * `$color` - An `Rgb888` color to apply to all characters.
 #[macro_export]
 macro_rules! screen_chars {
-    ($text:expr, $color:expr) => {
-        {
-            const LEN: usize = $text.len();
-            let mut chars = [ScreenChar::new(' ', $color); LEN];
-            let mut i = 0;
-            for c in $text.chars() {
-                chars[i] = ScreenChar::new(c, $color);
-                i += 1;
-            }
-            chars
+    ($text:expr, $color:expr) => {{
+        const LEN: usize = $text.len();
+        let mut chars = [ScreenChar::new(' ', $color); LEN];
+        let mut i = 0;
+        for c in $text.chars() {
+            chars[i] = ScreenChar::new(c, $color);
+            i += 1;
         }
-    }
+        chars
+    }};
 }
 
 /// Represents errors that can occur during display operations.
@@ -87,7 +92,7 @@ impl<'a> DisplayWriter<'a> {
     pub fn new(display: Display<'a>, font: &'a MonoFont<'a>, width: usize, height: usize) -> Self {
         let default_char = ScreenChar::new(' ', Rgb888::new(255, 255, 255));
         let buffer = vec![default_char; width * height];
-        
+
         Self {
             display,
             buffer,
@@ -98,7 +103,11 @@ impl<'a> DisplayWriter<'a> {
     }
 
     /// Calculates the default buffer dimensions based on the display size and font.
-    fn calculate_buffer_dimensions(display_width: usize, display_height: usize, font: &MonoFont) -> (usize, usize) {
+    fn calculate_buffer_dimensions(
+        display_width: usize,
+        display_height: usize,
+        font: &MonoFont,
+    ) -> (usize, usize) {
         let buffer_width = display_width / font.character_size.width as usize;
         let buffer_height = display_height / font.character_size.height as usize;
         (buffer_width, buffer_height)
@@ -107,9 +116,13 @@ impl<'a> DisplayWriter<'a> {
     /// Selects a font based on the display height and width.
     /// Returns a static 'MonoFont'. Consider using a `OnceCell` or similar
     /// to store the font.
-    pub fn select_font_and_dimensions(display_height: usize, display_width: usize) -> (MonoFont<'static>, usize, usize) {
+    pub fn select_font_and_dimensions(
+        display_height: usize,
+        display_width: usize,
+    ) -> (MonoFont<'static>, usize, usize) {
         for font in [FONT_10X20, FONT_8X13, FONT_6X10] {
-            let (width, height) = Self::calculate_buffer_dimensions(display_width, display_height, &font);
+            let (width, height) =
+                Self::calculate_buffer_dimensions(display_width, display_height, &font);
             if width > 0 && height > 0 {
                 return (font, width, height);
             }
@@ -118,7 +131,7 @@ impl<'a> DisplayWriter<'a> {
     }
 
     /// Flushes the buffer at point to the double buffer.
-    /// 
+    ///
     /// If the character is a space, fill it with an empty rectangle
     pub fn flush_buffer_at_point(
         &mut self,
@@ -170,9 +183,11 @@ impl<'a> DisplayWriter<'a> {
                 self.text_style.font.character_size.height,
             ),
         );
-        rect.into_styled(embedded_graphics::primitives::PrimitiveStyleBuilder::new()
-            .fill_color(Rgb888::new(0, 0, 0))
-            .build())
+        rect.into_styled(
+            embedded_graphics::primitives::PrimitiveStyleBuilder::new()
+                .fill_color(Rgb888::new(0, 0, 0))
+                .build(),
+        )
         .draw(&mut self.display)
         .map_err(|_| DisplayError::DrawError)
     }

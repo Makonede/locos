@@ -19,11 +19,12 @@ use core::{convert::Infallible, panic};
 
 use alloc::vec::Vec;
 use bootloader_api::info::{FrameBuffer, FrameBufferInfo, PixelFormat};
-use embedded_graphics::{pixelcolor::Rgb888, prelude::{
-    Dimensions, DrawTarget, OriginDimensions, RgbColor
-}, primitives::Rectangle, Pixel};
-
-use crate::serial_println;
+use embedded_graphics::{
+    Pixel,
+    pixelcolor::Rgb888,
+    prelude::{Dimensions, DrawTarget, OriginDimensions, RgbColor},
+    primitives::Rectangle,
+};
 
 /// Represents a position on the framebuffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +41,6 @@ pub struct Color {
     pub blue: u8,
 }
 
-
 pub struct WrappedFrameBuffer<'a> {
     framebuffer: &'a mut FrameBuffer,
     double_buffer: Vec<u8>,
@@ -49,12 +49,17 @@ pub struct WrappedFrameBuffer<'a> {
 impl<'a> WrappedFrameBuffer<'a> {
     pub fn new(framebuffer: &'a mut FrameBuffer) -> Self {
         let double_buffer = framebuffer.buffer().to_vec();
-        Self { framebuffer, double_buffer }
+        Self {
+            framebuffer,
+            double_buffer,
+        }
     }
 
     /// Flushes the double buffer to the framebuffer.
     pub fn flush(&mut self) {
-        self.framebuffer.buffer_mut().copy_from_slice(&self.double_buffer);
+        self.framebuffer
+            .buffer_mut()
+            .copy_from_slice(&self.double_buffer);
     }
 
     /// Get a mutable reference to the double buffer.
@@ -83,7 +88,7 @@ pub fn set_pixel_in(framebuffer: &mut WrappedFrameBuffer, position: Position, co
 
     let byte_offset = get_byte_offset(framebuffer, position);
 
-    let pixel_buffer = &mut framebuffer.buffer_mut()[byte_offset..byte_offset+4];
+    let pixel_buffer = &mut framebuffer.buffer_mut()[byte_offset..byte_offset + 4];
     match info.pixel_format {
         PixelFormat::Rgb => {
             pixel_buffer[0] = color.red;
@@ -94,24 +99,28 @@ pub fn set_pixel_in(framebuffer: &mut WrappedFrameBuffer, position: Position, co
             pixel_buffer[2] = color.red;
             pixel_buffer[1] = color.green;
             pixel_buffer[0] = color.blue;
-        },
+        }
         PixelFormat::U8 => {
             pixel_buffer[0] = color.red / 3 + color.green / 3 + color.blue / 3;
-        },
+        }
         other => panic!("unknown pixel format {other:?}"),
     }
 }
 
 /// Wrapper for framebuffer to implement DrawTarget. Only supports Rgb
 /// in the form of `Rgb888` provided by `embedded_graphics`.
-pub struct Display<'a> { framebuffer: &'a mut WrappedFrameBuffer<'a> }
+pub struct Display<'a> {
+    framebuffer: &'a mut WrappedFrameBuffer<'a>,
+}
 
 impl<'a> Display<'a> {
-    pub fn new(framebuffer: &'a mut WrappedFrameBuffer<'a>) -> Self { Self { framebuffer } }
+    pub fn new(framebuffer: &'a mut WrappedFrameBuffer<'a>) -> Self {
+        Self { framebuffer }
+    }
 
     fn draw_pixel(&mut self, Pixel(coordinates, color): Pixel<Rgb888>) {
         let (width, height) = {
-            let info =  self.framebuffer.info();
+            let info = self.framebuffer.info();
             (info.width, info.height)
         };
 
@@ -121,7 +130,11 @@ impl<'a> Display<'a> {
         };
 
         if (0..width).contains(&x) && (0..height).contains(&y) {
-            let color = Color { red: color.r(), green: color.g(), blue: color.b() };
+            let color = Color {
+                red: color.r(),
+                green: color.g(),
+                blue: color.b(),
+            };
             set_pixel_in(self.framebuffer, Position { x, y }, color);
         };
     }
@@ -129,27 +142,27 @@ impl<'a> Display<'a> {
     pub fn fill_display(&mut self, color: Rgb888) {
         let info = self.framebuffer.info();
         let buffer = self.framebuffer.buffer_mut();
-        
+
         for i in (0..buffer.len()).step_by(info.bytes_per_pixel) {
             match info.pixel_format {
                 PixelFormat::Rgb => {
                     buffer[i] = color.r();
                     buffer[i + 1] = color.g();
                     buffer[i + 2] = color.b();
-                },
+                }
                 PixelFormat::Bgr => {
                     buffer[i] = color.b();
                     buffer[i + 1] = color.g();
                     buffer[i + 2] = color.r();
-                },
+                }
                 PixelFormat::U8 => {
                     buffer[i] = color.r() / 3 + color.g() / 3 + color.b() / 3;
-                },
+                }
                 _ => panic!("Unsupported pixel format"),
             }
         }
     }
-    
+
     /// flushes the double buffer to the framebuffer.
     pub fn flush(&mut self) {
         self.framebuffer.flush();
@@ -164,17 +177,19 @@ impl DrawTarget for Display<'_> {
 
     fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
     where
-        I: IntoIterator<Item = Pixel<Self::Color>> {
-        for pixel in pixels.into_iter() { self.draw_pixel(pixel); }
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        for pixel in pixels.into_iter() {
+            self.draw_pixel(pixel);
+        }
 
         Ok(())
     }
 
     fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
-        where
-            I: IntoIterator<Item = Self::Color>, {
-
-
+    where
+        I: IntoIterator<Item = Self::Color>,
+    {
         let area = area.intersection(&self.bounding_box());
 
         if area.size.width == 0 || area.size.height == 0 {
@@ -190,26 +205,28 @@ impl DrawTarget for Display<'_> {
         let (width, height) = (area.size.width as usize, area.size.height as usize);
 
         for y in 0..height {
-            let row_start = (start_y + y) * info.stride * info.bytes_per_pixel + start_x * info.bytes_per_pixel;
+            let row_start =
+                (start_y + y) * info.stride * info.bytes_per_pixel + start_x * info.bytes_per_pixel;
             let row_end = row_start + width * info.bytes_per_pixel;
 
             for (i, color) in (row_start..row_end)
                 .step_by(info.bytes_per_pixel)
-                .zip(&mut colors) {
+                .zip(&mut colors)
+            {
                 match info.pixel_format {
                     PixelFormat::Rgb => {
                         buffer[i] = color.r();
                         buffer[i + 1] = color.g();
                         buffer[i + 2] = color.b();
-                    },
+                    }
                     PixelFormat::Bgr => {
                         buffer[i] = color.b();
                         buffer[i + 1] = color.g();
                         buffer[i + 2] = color.r();
-                    },
+                    }
                     PixelFormat::U8 => {
                         buffer[i] = color.r() / 3 + color.g() / 3 + color.b() / 3;
-                    },
+                    }
                     _ => panic!("Unsupported pixel format"),
                 }
             }
@@ -222,7 +239,7 @@ impl DrawTarget for Display<'_> {
         self.fill_display(color);
         Ok(())
     }
-} 
+}
 
 /// Allows `embedded_graphics` to get the dimensions of the framebuffer.
 impl OriginDimensions for Display<'_> {

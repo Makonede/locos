@@ -99,8 +99,8 @@ impl FreeList {
         }
     }
 
-    /// Checks if a block is in the free list 
-    /// 
+    /// Checks if a block is in the free list
+    ///
     /// This method takes O(n) time
     pub fn exists(&self, ptr: NonNull<()>) -> bool {
         let mut current = self.head;
@@ -117,7 +117,7 @@ impl FreeList {
     }
 
     /// Removes a block from the free list
-    /// 
+    ///
     /// This method takes O(n) time
     pub fn remove(&mut self, ptr: NonNull<()>) {
         let mut current = self.head;
@@ -222,7 +222,11 @@ impl<const L: usize, const S: usize> BuddyAlloc<L, S> {
     /// * `heap_end` - Virtual address of the heap end
     pub const fn new(heap_start: VirtAddr, _heap_end: VirtAddr) -> Self {
         let mut free_lists: [FreeList; L] = [FreeList::new(); L];
-        free_lists[0].head = Some(NonNull::new(heap_start.as_u64() as *mut ()).unwrap().cast::<Node>());
+        free_lists[0].head = Some(
+            NonNull::new(heap_start.as_u64() as *mut ())
+                .unwrap()
+                .cast::<Node>(),
+        );
         free_lists[0].len = 1;
 
         Self {
@@ -291,7 +295,6 @@ impl<const L: usize, const S: usize> BuddyAlloc<L, S> {
         let buddy = ptr.as_ptr() as usize ^ block_size;
         let buddy_nonnull = NonNull::new(buddy as *mut ()).unwrap();
 
-        
         if self.free_lists[level].exists(buddy_nonnull) {
             // remove buddies from the free list
             self.free_lists[level].remove(buddy_nonnull);
@@ -313,9 +316,7 @@ impl<const L: usize, const S: usize> BuddyAlloc<L, S> {
 /// - Allocations are aligned to the requested alignment
 /// - Each allocated block is exclusive and doesn't overlap with other allocations
 /// - Deallocated blocks were previously allocated with the same layout
-unsafe impl<const L: usize, const S: usize> GlobalAlloc
-    for Locked<BuddyAlloc<L, S>>
-{
+unsafe impl<const L: usize, const S: usize> GlobalAlloc for Locked<BuddyAlloc<L, S>> {
     unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
         let mut inner = self.lock();
         let size = layout.size().next_power_of_two().max(layout.align());

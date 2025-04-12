@@ -1,6 +1,7 @@
 use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use x86_64::{
-    structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB}, VirtAddr
+    VirtAddr,
+    structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
 };
 
 /// A frame allocator that returns frames from the memory regions provided by the bootloader.
@@ -11,21 +12,24 @@ pub struct BootInfoFrameAllocator {
 
 impl BootInfoFrameAllocator {
     /// Initializes a new frame allocator with the given memory map.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// The caller must ensure that the memory map is valid.
     pub unsafe fn init(memory_map: &'static MemoryRegions) -> Self {
-        Self { memory_map, next: 0 }
+        Self {
+            memory_map,
+            next: 0,
+        }
     }
 
     /// Returns an iterator over the usable frames specified in the memory map.
     fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
-        let usable_regions = self.memory_map.iter().filter(
-            |region|
-            matches!(region.kind, MemoryRegionKind::Usable)
-        );
-    
+        let usable_regions = self
+            .memory_map
+            .iter()
+            .filter(|region| matches!(region.kind, MemoryRegionKind::Usable));
+
         usable_regions
             .map(|region| region.start..region.end)
             .flat_map(|region_range| region_range.step_by(4096))

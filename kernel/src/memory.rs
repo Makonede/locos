@@ -1,6 +1,6 @@
-pub mod paging;
 pub mod alloc;
+pub mod paging;
 
-pub use paging::init;
-pub use paging::BootInfoFrameAllocator;
 pub use alloc::init_heap;
+pub use paging::BootInfoFrameAllocator;
+pub use paging::init;
