@@ -17,14 +17,14 @@ You should have received a copy of the GNU General Public License along with loc
 
 use core::{convert::Infallible, panic};
 
-use alloc::vec::Vec;
-use bootloader_api::info::{FrameBuffer, FrameBufferInfo, PixelFormat};
+use alloc::{slice, vec::Vec};
 use embedded_graphics::{
     Pixel,
     pixelcolor::Rgb888,
     prelude::{Dimensions, DrawTarget, OriginDimensions, RgbColor},
     primitives::Rectangle,
 };
+use limine::framebuffer::{Framebuffer, MemoryModel};
 
 /// Represents a position on the framebuffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,24 +41,70 @@ pub struct Color {
     pub blue: u8,
 }
 
-pub struct WrappedFrameBuffer<'a> {
-    framebuffer: &'a mut FrameBuffer,
+#[derive(Clone, Copy)]
+pub struct FramebufferInfo {
+    pub width: usize,
+    pub height: usize,
+    pub pitch: usize,
+    /// **bytes** per pixel
+    pub bpp: usize,
+    pub red_mask_size: u8,
+    pub green_mask_size: u8,
+    pub blue_mask_size: u8,
+    pub red_mask_shift: u8,
+    pub green_mask_shift: u8,
+    pub blue_mask_shift: u8,
+    pub memory_model: MemoryModel,
+}
+
+pub unsafe fn get_buffer_from_framebuffer(framebuffer: *mut u8, info: FramebufferInfo) -> &'static mut [u8] {
+    unsafe { slice::from_raw_parts_mut(framebuffer, info.height * info.width * info.bpp / 8) }
+}
+
+pub fn get_info_from_frambuffer(framebuffer: &Framebuffer) -> FramebufferInfo {
+    let pitch = framebuffer.pitch() as usize;
+    let bpp = framebuffer.bpp() as usize;
+    let width = framebuffer.width() as usize;
+    let height = framebuffer.height() as usize;
+
+    FramebufferInfo {
+        width,
+        height,
+        pitch,
+        bpp: bpp / 8,
+        red_mask_size: framebuffer.red_mask_size(),
+        green_mask_size: framebuffer.green_mask_size(),
+        blue_mask_size: framebuffer.blue_mask_size(),
+        red_mask_shift: framebuffer.red_mask_shift(),
+        green_mask_shift: framebuffer.green_mask_shift(),
+        blue_mask_shift: framebuffer.blue_mask_shift(),
+        memory_model: framebuffer.memory_model(),
+    }
+}
+
+pub struct WrappedFrameBuffer {
+    framebuffer: *mut u8,
+    pub info: FramebufferInfo,
     double_buffer: Vec<u8>,
 }
 
-impl<'a> WrappedFrameBuffer<'a> {
-    pub fn new(framebuffer: &'a mut FrameBuffer) -> Self {
-        let double_buffer = framebuffer.buffer().to_vec();
+/// must be used behind a mutex
+unsafe impl Send for WrappedFrameBuffer {}
+
+impl WrappedFrameBuffer {
+    pub fn new(framebuffer: &mut Framebuffer) -> Self {
+        let double_buffer = unsafe { get_buffer_from_framebuffer(framebuffer.addr(), get_info_from_frambuffer(framebuffer)) }
+            .to_vec();
         Self {
-            framebuffer,
+            framebuffer: framebuffer.addr(),
+            info: get_info_from_frambuffer(framebuffer),
             double_buffer,
         }
     }
 
     /// Flushes the double buffer to the framebuffer.
     pub fn flush(&mut self) {
-        self.framebuffer
-            .buffer_mut()
+        unsafe { get_buffer_from_framebuffer(self.framebuffer, self.info) }
             .copy_from_slice(&self.double_buffer);
     }
 
@@ -66,61 +112,49 @@ impl<'a> WrappedFrameBuffer<'a> {
     pub fn buffer_mut(&mut self) -> &mut [u8] {
         &mut self.double_buffer
     }
-
-    /// Get the internal framebuffer info.
-    pub fn info(&self) -> FrameBufferInfo {
-        self.framebuffer.info()
-    }
 }
 
 pub fn get_byte_offset(framebuffer: &WrappedFrameBuffer, position: Position) -> usize {
-    let info = framebuffer.info();
-
-    let line_offset = position.y * info.stride;
+    let info = framebuffer.info;
+    
+    let line_offset = position.y * info.pitch;
     let pixel_offset = line_offset + position.x;
 
-    pixel_offset * info.bytes_per_pixel
+    pixel_offset * info.bpp
 }
 
 /// Draw a pixel to the framebuffer in a certain position, accounting for alignment.
 pub fn set_pixel_in(framebuffer: &mut WrappedFrameBuffer, position: Position, color: Color) {
-    let info = framebuffer.info();
+    let info = framebuffer.info;
 
     let byte_offset = get_byte_offset(framebuffer, position);
 
-    let pixel_buffer = &mut framebuffer.buffer_mut()[byte_offset..byte_offset + 4];
-    match info.pixel_format {
-        PixelFormat::Rgb => {
-            pixel_buffer[0] = color.red;
-            pixel_buffer[1] = color.green;
-            pixel_buffer[2] = color.blue;
-        }
-        PixelFormat::Bgr => {
-            pixel_buffer[2] = color.red;
-            pixel_buffer[1] = color.green;
-            pixel_buffer[0] = color.blue;
-        }
-        PixelFormat::U8 => {
-            pixel_buffer[0] = color.red / 3 + color.green / 3 + color.blue / 3;
-        }
-        other => panic!("unknown pixel format {other:?}"),
+    let pixel_buffer = &mut framebuffer.buffer_mut()[byte_offset..byte_offset + info.bpp];
+    
+    let red = ((color.red as u32) & ((1 << info.red_mask_size) - 1)) << info.red_mask_shift;
+    let green = ((color.green as u32) & ((1 << info.green_mask_size) - 1)) << info.green_mask_shift;
+    let blue = ((color.blue as u32) & ((1 << info.blue_mask_size) - 1)) << info.blue_mask_shift;
+    let pixel = red | green | blue;
+
+    for i in 0..info.bpp {
+        pixel_buffer[i] = (pixel >> (8 * i)) as u8;
     }
 }
 
 /// Wrapper for framebuffer to implement DrawTarget. Only supports Rgb
 /// in the form of `Rgb888` provided by `embedded_graphics`.
-pub struct Display<'a> {
-    framebuffer: &'a mut WrappedFrameBuffer<'a>,
+pub struct Display {
+    framebuffer: WrappedFrameBuffer,
 }
 
-impl<'a> Display<'a> {
-    pub fn new(framebuffer: &'a mut WrappedFrameBuffer<'a>) -> Self {
+impl Display {
+    pub fn new(framebuffer: WrappedFrameBuffer) -> Self {
         Self { framebuffer }
     }
 
     fn draw_pixel(&mut self, Pixel(coordinates, color): Pixel<Rgb888>) {
         let (width, height) = {
-            let info = self.framebuffer.info();
+            let info = self.framebuffer.info;
             (info.width, info.height)
         };
 
@@ -135,30 +169,22 @@ impl<'a> Display<'a> {
                 green: color.g(),
                 blue: color.b(),
             };
-            set_pixel_in(self.framebuffer, Position { x, y }, color);
+            set_pixel_in(&mut self.framebuffer, Position { x, y }, color);
         };
     }
 
     pub fn fill_display(&mut self, color: Rgb888) {
-        let info = self.framebuffer.info();
+        let info = self.framebuffer.info;
         let buffer = self.framebuffer.buffer_mut();
 
-        for i in (0..buffer.len()).step_by(info.bytes_per_pixel) {
-            match info.pixel_format {
-                PixelFormat::Rgb => {
-                    buffer[i] = color.r();
-                    buffer[i + 1] = color.g();
-                    buffer[i + 2] = color.b();
-                }
-                PixelFormat::Bgr => {
-                    buffer[i] = color.b();
-                    buffer[i + 1] = color.g();
-                    buffer[i + 2] = color.r();
-                }
-                PixelFormat::U8 => {
-                    buffer[i] = color.r() / 3 + color.g() / 3 + color.b() / 3;
-                }
-                _ => panic!("Unsupported pixel format"),
+        for i in (0..buffer.len()).step_by(info.bpp) {
+            let red = ((color.r() as u32) & ((1 << info.red_mask_size) - 1)) << info.red_mask_shift;
+            let green = ((color.g() as u32) & ((1 << info.green_mask_size) - 1)) << info.green_mask_shift;
+            let blue = ((color.b() as u32) & ((1 << info.blue_mask_size) - 1)) << info.blue_mask_shift;
+            let pixel = red | green | blue;
+
+            for j in 0..info.bpp {
+                buffer[i + j] = (pixel >> (8 * j)) as u8;
             }
         }
     }
@@ -170,7 +196,7 @@ impl<'a> Display<'a> {
 }
 
 /// Makes the framebuffer a DrawTarget for `embedded_graphics`.
-impl DrawTarget for Display<'_> {
+impl DrawTarget for Display {
     type Color = Rgb888;
 
     type Error = Infallible;
@@ -196,7 +222,7 @@ impl DrawTarget for Display<'_> {
             return Ok(());
         }
 
-        let info = self.framebuffer.info();
+        let info = self.framebuffer.info;
         let buffer = self.framebuffer.buffer_mut();
 
         let mut colors = colors.into_iter();
@@ -206,28 +232,20 @@ impl DrawTarget for Display<'_> {
 
         for y in 0..height {
             let row_start =
-                (start_y + y) * info.stride * info.bytes_per_pixel + start_x * info.bytes_per_pixel;
-            let row_end = row_start + width * info.bytes_per_pixel;
+                (start_y + y) * info.pitch * info.bpp + start_x * info.bpp;
+            let row_end = row_start + width * info.bpp;
 
             for (i, color) in (row_start..row_end)
-                .step_by(info.bytes_per_pixel)
+                .step_by(info.bpp)
                 .zip(&mut colors)
             {
-                match info.pixel_format {
-                    PixelFormat::Rgb => {
-                        buffer[i] = color.r();
-                        buffer[i + 1] = color.g();
-                        buffer[i + 2] = color.b();
-                    }
-                    PixelFormat::Bgr => {
-                        buffer[i] = color.b();
-                        buffer[i + 1] = color.g();
-                        buffer[i + 2] = color.r();
-                    }
-                    PixelFormat::U8 => {
-                        buffer[i] = color.r() / 3 + color.g() / 3 + color.b() / 3;
-                    }
-                    _ => panic!("Unsupported pixel format"),
+                let red = ((color.r() as u32) & ((1 << info.red_mask_size) - 1)) << info.red_mask_shift;
+                let green = ((color.g() as u32) & ((1 << info.green_mask_size) - 1)) << info.green_mask_shift;
+                let blue = ((color.b() as u32) & ((1 << info.blue_mask_size) - 1)) << info.blue_mask_shift;
+                let pixel = red | green | blue;
+
+                for j in 0..info.bpp {
+                    buffer[i + j] = (pixel >> (8 * j)) as u8;
                 }
             }
         }
@@ -242,9 +260,9 @@ impl DrawTarget for Display<'_> {
 }
 
 /// Allows `embedded_graphics` to get the dimensions of the framebuffer.
-impl OriginDimensions for Display<'_> {
+impl OriginDimensions for Display {
     fn size(&self) -> embedded_graphics::prelude::Size {
-        let info = self.framebuffer.info();
+        let info = self.framebuffer.info;
         embedded_graphics::prelude::Size::new(info.width as u32, info.height as u32)
     }
 }

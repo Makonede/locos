@@ -26,17 +26,18 @@ pub mod serial;
 
 extern crate alloc;
 
-use core::panic::PanicInfo;
+use core::{arch::asm, panic::PanicInfo};
 
 use alloc::boxed::Box;
-use bootloader_api::{
-    BootInfo, BootloaderConfig,
-    config::Mapping,
-    entry_point,
-    info::{FrameBuffer, FrameBufferInfo},
-};
 use gdt::init_gdt;
 use interrupts::init_idt;
+use limine::{
+    BaseRevision,
+    framebuffer::Framebuffer,
+    request::{
+        FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
+    },
+};
 use memory::{BootInfoFrameAllocator, init_heap, paging};
 use output::{Display, DisplayWriter, LineWriter, framebuffer::WrappedFrameBuffer};
 use spin::mutex::Mutex;
@@ -47,11 +48,11 @@ pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
 /// Initializes the global display writer.
 ///
 /// In the future, all fonts might need to be present in order to allow for selection
-pub fn init_writer(framebuffer: &'static mut FrameBuffer, info: FrameBufferInfo) {
-    let wrapped_buffer = Box::new(WrappedFrameBuffer::new(framebuffer));
-    let wrapped_buffer: &'static mut WrappedFrameBuffer = Box::leak(wrapped_buffer);
+pub fn init_writer(framebuffer: &mut Framebuffer) {
+    let wrapped_buffer = WrappedFrameBuffer::new(framebuffer);
     let display = Display::new(wrapped_buffer);
-    let (font, width, height) = DisplayWriter::select_font_and_dimensions(info.height, info.width);
+    let (font, width, height) =
+        DisplayWriter::select_font_and_dimensions(framebuffer.height() as usize, framebuffer.width() as usize);
     let font = Box::leak(Box::new(font));
     let displaywriter = DisplayWriter::new(display, font, width, height);
 
@@ -88,44 +89,84 @@ macro_rules! println {
     };
 }
 
-fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
+#[unsafe(no_mangle)]
+unsafe extern "C" fn kernel_main() -> ! {
+    assert!(BASE_REVISION.is_supported());
     init_gdt();
     init_idt();
-    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
 
-    let mut offset_allocator = unsafe {
-        paging::init(VirtAddr::new(
-            boot_info.physical_memory_offset.into_option().unwrap(),
-        ))
-    };
+    let memory_regions = MEMORY_MAP_REQUEST
+        .get_response()
+        .expect("memory map request failed")
+        .entries();
+    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(memory_regions) };
+
+    let physical_memory_offset = HHDM_REQUEST
+        .get_response()
+        .expect("Hhdm request failed")
+        .offset();
+    let mut offset_allocator = unsafe { paging::init(VirtAddr::new(physical_memory_offset)) };
 
     unsafe {
         init_heap(&mut offset_allocator, &mut frame_allocator).expect("heap initialization failed");
     }
 
-    let framebuffer_option = &mut boot_info.framebuffer;
-    let framebuffer = framebuffer_option.as_mut().unwrap();
-    let framebuffer_info = framebuffer.info();
-    init_writer(framebuffer, framebuffer_info);
+    let framebuffer_response = FRAMEBUFFER_REQUEST
+        .get_response()
+        .expect("framebuffer request failed");
+    let mut framebuffer = framebuffer_response
+        .framebuffers()
+        .next()
+        .expect("framebuffer not found");
+
+    if framebuffer.bpp() % 8 != 0 {
+        panic!("Framebuffer bpp is not a multiple of 8");
+    }
+    
+    init_writer(&mut framebuffer);
 
     for i in 0..100 {
         println!("Hello, world! {}", i);
     }
 
-    loop {}
+    hcf();
 }
 
-pub static BOOTLOADER_CONFIG: BootloaderConfig = {
-    let mut config = BootloaderConfig::new_default();
-    config.mappings.physical_memory = Some(Mapping::Dynamic);
-    config
-};
+#[used]
+#[unsafe(link_section = ".requests")]
+pub static BASE_REVISION: BaseRevision = BaseRevision::new();
 
-entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
+#[used]
+#[unsafe(link_section = ".requests")]
+static FRAMEBUFFER_REQUEST: FramebufferRequest = FramebufferRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests_start_marker")]
+static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
+#[used]
+#[unsafe(link_section = ".requests_end_marker")]
+static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     serial_println!("{}", info);
     println!("{}", info);
-    loop {}
+    hcf();
+}
+
+fn hcf() -> ! {
+    loop {
+        unsafe {
+            #[cfg(target_arch = "x86_64")]
+            asm!("hlt");
+        }
+    }
 }

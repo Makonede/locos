@@ -94,61 +94,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "bootloader-x86_64-common"
-version = "0.11.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "852ffb13d08a29cd9d3b73061905bb43680de52b339aaed75a8f039b3a38269d"
-dependencies = [
- "bootloader-boot-config",
- "bootloader_api",
- "conquer-once 0.3.2",
- "log",
- "noto-sans-mono-bitmap",
- "rand",
- "rand_hc",
- "raw-cpuid",
- "spinning_top",
- "uart_16550 0.2.19",
- "usize_conversions",
- "x86_64 0.15.2",
- "xmas-elf",
-]
-
-[[package]]
-name = "bootloader_api"
-version = "0.11.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77fadafc2a2fa690f4f14a2e2a41c65d9e810b7fe959245bdf6d3b9c6d7e4bf1"
-
-[[package]]
 name = "byteorder"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
-name = "cc"
-version = "1.2.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "525046617d8376e3db1deffb079e91cef90a89fc3ca5c185bbf8c9ecdd15cd5c"
-dependencies = [
- "shlex",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
-
-[[package]]
-name = "conquer-once"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c6d3a9775a69f6d1fe2cc888999b67ed30257d3da4d2af91984e722f2ec918a"
-dependencies = [
- "conquer-util",
-]
 
 [[package]]
 name = "conquer-once"
@@ -231,15 +186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flanterm"
-version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d952f6a34aab79341bd9faee86b4449260bf1d6d328e49058141c86e414fb96a"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "float-cmp"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -288,15 +234,13 @@ checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
 name = "kernel"
 version = "0.1.0"
 dependencies = [
- "bootloader-x86_64-common",
- "bootloader_api",
- "conquer-once 0.4.0",
+ "conquer-once",
  "embedded-graphics",
- "flanterm",
+ "limine",
  "log",
  "spin",
- "uart_16550 0.3.2",
- "x86_64 0.15.2",
+ "uart_16550",
+ "x86_64",
 ]
 
 [[package]]
@@ -304,6 +248,15 @@ name = "libc"
 version = "0.2.171"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6"
+
+[[package]]
+name = "limine"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e6cb7fd182815ec1ea9e26061418ac37c3eebea47a14e773c563533f277bcef"
+dependencies = [
+ "bitflags 2.9.0",
+]
 
 [[package]]
 name = "linux-raw-sys"
@@ -359,12 +312,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3c8dda44ff03a2f238717214da50f65d5a53b45cd213a7370424ffdb6fae815"
 
 [[package]]
-name = "noto-sans-mono-bitmap"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a27daf9557165efe1d09b52f97393bf6283cadb0a76fbe64a1061e15553a994a"
-
-[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -414,30 +361,6 @@ name = "radium"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
-
-[[package]]
-name = "rand"
-version = "0.8.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
-dependencies = [
- "rand_core",
-]
-
-[[package]]
-name = "rand_core"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
-
-[[package]]
-name = "rand_hc"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b363d4f6370f88d62bf586c80405657bde0f0e1b8945d47d2ad59b906cb4f54"
-dependencies = [
- "rand_core",
-]
 
 [[package]]
 name = "raw-cpuid"
@@ -521,25 +444,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "shlex"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
-
-[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-dependencies = [
- "lock_api",
-]
-
-[[package]]
-name = "spinning_top"
-version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b9eb1a2f4c41445a3a0ff9abc5221c5fcd28e1f13cd7c0397706f9ac938ddb0"
 dependencies = [
  "lock_api",
 ]
@@ -596,17 +504,6 @@ dependencies = [
 
 [[package]]
 name = "uart_16550"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "614ff2a87880d4bd4374722268598a970bbad05ced8bf630439417347254ab2e"
-dependencies = [
- "bitflags 1.3.2",
- "rustversion",
- "x86_64 0.14.13",
-]
-
-[[package]]
-name = "uart_16550"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e492212ac378a5e00da953718dafb1340d9fbaf4f27d6f3c5cab03d931d1c049"
@@ -621,12 +518,6 @@ name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a5f39404a5da50712a4c1eecf25e90dd62b613502b7e925fd4e4d19b5c96512"
-
-[[package]]
-name = "usize_conversions"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f70329e2cbe45d6c97a5112daad40c34cd9a4e18edb5a2a18fefeb584d8d25e5"
 
 [[package]]
 name = "uuid"
@@ -756,18 +647,6 @@ dependencies = [
 
 [[package]]
 name = "x86_64"
-version = "0.14.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c101112411baafbb4bf8d33e4c4a80ab5b02d74d2612331c61e8192fc9710491"
-dependencies = [
- "bit_field",
- "bitflags 2.9.0",
- "rustversion",
- "volatile",
-]
-
-[[package]]
-name = "x86_64"
 version = "0.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f042214de98141e9c8706e8192b73f56494087cc55ebec28ce10f26c5c364ae"
@@ -777,18 +656,3 @@ dependencies = [
  "rustversion",
  "volatile",
 ]
-
-[[package]]
-name = "xmas-elf"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d29b4d8e7beaceb4e77447ba941a7600d23d0319ab52da0461abea214832d5a"
-dependencies = [
- "zero",
-]
-
-[[package]]
-name = "zero"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fe21bcc34ca7fe6dd56cc2cb1261ea59d6b93620215aefb5ea6032265527784"

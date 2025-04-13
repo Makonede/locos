@@ -1,22 +1,22 @@
-use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
+use limine::memory_map::{Entry, EntryType};
 use x86_64::{
     VirtAddr,
     structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
 };
 
 /// A frame allocator that returns frames from the memory regions provided by the bootloader.
-pub struct BootInfoFrameAllocator {
-    memory_map: &'static MemoryRegions,
+pub struct BootInfoFrameAllocator<'a> {
+    memory_map: &'a [&'a Entry],
     next: usize,
 }
 
-impl BootInfoFrameAllocator {
+impl<'a> BootInfoFrameAllocator<'a> {
     /// Initializes a new frame allocator with the given memory map.
     ///
     /// # Safety
     ///
     /// The caller must ensure that the memory map is valid.
-    pub unsafe fn init(memory_map: &'static MemoryRegions) -> Self {
+    pub unsafe fn init(memory_map: &'static [&Entry]) -> Self {
         Self {
             memory_map,
             next: 0,
@@ -28,17 +28,17 @@ impl BootInfoFrameAllocator {
         let usable_regions = self
             .memory_map
             .iter()
-            .filter(|region| matches!(region.kind, MemoryRegionKind::Usable));
+            .filter(|region| region.entry_type == EntryType::USABLE);
 
         usable_regions
-            .map(|region| region.start..region.end)
+            .map(|region| region.base..(region.base + region.length))
             .flat_map(|region_range| region_range.step_by(4096))
             .map(|frame| PhysFrame::containing_address(x86_64::PhysAddr::new(frame)))
     }
 }
 
 /// Implement the FrameAllocator from `x86_64`` trait for BootInfoFrameAllocator.
-unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
+unsafe impl<'a> FrameAllocator<Size4KiB> for BootInfoFrameAllocator<'a> {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
         let frame = self.usable_frames().nth(self.next);
         self.next += 1;

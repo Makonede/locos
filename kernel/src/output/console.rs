@@ -121,7 +121,7 @@ pub struct OneDRange {
 /// to an in-memory buffer, and then rendering that buffer to the framebuffer. It
 /// uses the `embedded-graphics` crate for drawing operations.
 pub struct DisplayWriter<'a> {
-    display: Display<'a>,
+    display: Display,
     pub buffer: Vec<ScreenChar>,
     pub buffer_width: usize,
     pub buffer_height: usize,
@@ -129,7 +129,7 @@ pub struct DisplayWriter<'a> {
 }
 
 impl<'a> DisplayWriter<'a> {
-    pub fn new(display: Display<'a>, font: &'a MonoFont<'a>, width: usize, height: usize) -> Self {
+    pub fn new(display: Display, font: &'a MonoFont<'a>, width: usize, height: usize) -> Self {
         let default_char = ScreenChar::new(' ', Rgb888::new(255, 255, 255));
         let buffer = vec![default_char; width * height];
 
