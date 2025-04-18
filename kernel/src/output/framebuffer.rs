@@ -57,6 +57,10 @@ pub struct FramebufferInfo {
     pub memory_model: MemoryModel,
 }
 
+/// Converts the pointer to the start of the framebuffer to a mutable slice.
+/// 
+/// # Safety
+/// The caller needs to make sure the frambuffer pointer and info point to a valid frambuffer.
 pub unsafe fn get_buffer_from_framebuffer(framebuffer: *mut u8, info: FramebufferInfo) -> &'static mut [u8] {
     unsafe { slice::from_raw_parts_mut(framebuffer, info.height * info.width * info.bpp / 8) }
 }
