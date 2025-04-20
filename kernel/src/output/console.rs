@@ -136,7 +136,7 @@ impl<'a> DisplayWriter<'a> {
         Self {
             display,
             buffer,
-            text_style: MonoTextStyle::new(&font, Rgb888::new(255, 255, 255)),
+            text_style: MonoTextStyle::new(font, Rgb888::new(255, 255, 255)),
             buffer_width: width,
             buffer_height: height,
         }

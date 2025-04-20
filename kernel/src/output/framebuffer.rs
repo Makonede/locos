@@ -15,7 +15,7 @@ You should have received a copy of the GNU General Public License along with loc
 <https://www.gnu.org/licenses/>.
 */
 
-use core::{convert::Infallible, panic};
+use core::convert::Infallible;
 
 use alloc::{slice, vec::Vec};
 use embedded_graphics::{
@@ -75,7 +75,7 @@ pub fn get_info_from_frambuffer(framebuffer: &Framebuffer) -> FramebufferInfo {
         width,
         height,
         pitch,
-        bpp: (bpp + 7) / 8,  // Round up to nearest byte
+        bpp: bpp.div_ceil(8),  // Round up to nearest byte
         red_mask_size: framebuffer.red_mask_size(),
         green_mask_size: framebuffer.green_mask_size(),
         blue_mask_size: framebuffer.blue_mask_size(),
@@ -122,9 +122,9 @@ pub fn get_byte_offset(framebuffer: &WrappedFrameBuffer, position: Position) -> 
     let info = framebuffer.info;
     
     let line_offset = position.y * info.pitch;
-    let byte_offset = line_offset + position.x * info.bpp;
+    
 
-    byte_offset
+    line_offset + position.x * info.bpp
 }
 
 /// Draw a pixel to the framebuffer in a certain position, accounting for alignment.
