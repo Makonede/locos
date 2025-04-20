@@ -1,7 +1,10 @@
 # Added by cargo
 
 **/target
+build
 limine
+ovmf
+locos.iso
 
 
 # Added by cargo
