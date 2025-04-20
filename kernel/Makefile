@@ -2,7 +2,8 @@
 MAKEFLAGS += -rR
 .SUFFIXES:
 
-override OUTPUT := kernel
+override OUTPUT := kernel.elf
+override BUILD_DIR := ../build
 
 override RUST_TARGET := x86_64-unknown-none
 
@@ -20,13 +21,13 @@ endif
 .PHONY: all
 all:
 	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE)
-	cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/kernel ../kernel.elf
+	mkdir -p $(BUILD_DIR) && cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/kernel $(BUILD_DIR)/$(OUTPUT)
 
 # Clean targets
 .PHONY: clean
 clean:
 	cargo clean
-	rm -f ../kernel.elf
+	rm -rf $(BUILD_DIR)
 
 .PHONY: distclean
 distclean: clean
