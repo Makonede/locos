@@ -62,7 +62,7 @@ pub struct FramebufferInfo {
 /// # Safety
 /// The caller needs to make sure the frambuffer pointer and info point to a valid frambuffer.
 pub unsafe fn get_buffer_from_framebuffer(framebuffer: *mut u8, info: FramebufferInfo) -> &'static mut [u8] {
-    unsafe { slice::from_raw_parts_mut(framebuffer, info.height * info.width * info.bpp / 8) }
+    unsafe { slice::from_raw_parts_mut(framebuffer, info.height * info.pitch) }
 }
 
 pub fn get_info_from_frambuffer(framebuffer: &Framebuffer) -> FramebufferInfo {
@@ -75,7 +75,7 @@ pub fn get_info_from_frambuffer(framebuffer: &Framebuffer) -> FramebufferInfo {
         width,
         height,
         pitch,
-        bpp: bpp / 8,
+        bpp: (bpp + 7) / 8,  // Round up to nearest byte
         red_mask_size: framebuffer.red_mask_size(),
         green_mask_size: framebuffer.green_mask_size(),
         blue_mask_size: framebuffer.blue_mask_size(),
@@ -122,9 +122,9 @@ pub fn get_byte_offset(framebuffer: &WrappedFrameBuffer, position: Position) -> 
     let info = framebuffer.info;
     
     let line_offset = position.y * info.pitch;
-    let pixel_offset = line_offset + position.x;
+    let byte_offset = line_offset + position.x * info.bpp;
 
-    pixel_offset * info.bpp
+    byte_offset
 }
 
 /// Draw a pixel to the framebuffer in a certain position, accounting for alignment.
@@ -235,8 +235,7 @@ impl DrawTarget for Display {
         let (width, height) = (area.size.width as usize, area.size.height as usize);
 
         for y in 0..height {
-            let row_start =
-                (start_y + y) * info.pitch * info.bpp + start_x * info.bpp;
+            let row_start = (start_y + y) * info.pitch + start_x * info.bpp;
             let row_end = row_start + width * info.bpp;
 
             for (i, color) in (row_start..row_end)

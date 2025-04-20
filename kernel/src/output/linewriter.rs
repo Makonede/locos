@@ -23,26 +23,23 @@ impl<'a> LineWriter<'a> {
 
     /// Shifts the buffer up by one line, clearing the last.
     fn shift_buffer_up(&mut self) -> Result<(), DisplayError> {
-        let mut characters = Vec::new();
-        for y in 0..self.displaywriter.buffer_height - 1 {
-            characters.extend_from_slice(self.displaywriter.get_char_range(
-                y + 1,
-                0,
-                self.displaywriter.buffer_width,
-            ));
+        // Calculate dimensions
+        let line_width = self.displaywriter.buffer_width;
+        let total_lines = self.displaywriter.buffer_height;
+        
+        // Move all lines up at once using the underlying buffer
+        self.displaywriter.buffer.copy_within(
+            line_width..(total_lines * line_width),
+            0
+        );
 
-            self.displaywriter.write_range(0, y, &characters)?;
-            characters.clear();
-        }
-
-        let blank_characters =
-            vec![ScreenChar::new(' ', Rgb888::new(255, 255, 255)); self.displaywriter.buffer_width];
-        self.displaywriter.write_range(
-            0,
-            self.displaywriter.buffer_height - 1,
-            &blank_characters,
-        )?;
-
+        // Clear the last line
+        let blank_line_start = (total_lines - 1) * line_width;
+        let blank_line_end = total_lines * line_width;
+        self.displaywriter.buffer[blank_line_start..blank_line_end]
+            .fill(ScreenChar::new(' ', Rgb888::new(255, 255, 255)));
+        
+        // Flush the changes
         self.displaywriter.flush_entire_buffer()?;
 
         Ok(())
