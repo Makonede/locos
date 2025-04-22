@@ -24,3 +24,4 @@ pub mod flanconsole;
 pub use console::DisplayWriter;
 pub use framebuffer::Display;
 pub use linewriter::LineWriter;
+pub use flanconsole::{FlanConsole, flanterm_init, FLANTERM};

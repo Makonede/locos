@@ -28,36 +28,17 @@ extern crate alloc;
 
 use core::{arch::asm, panic::PanicInfo};
 
-use alloc::boxed::Box;
 use gdt::init_gdt;
 use interrupts::init_idt;
 use limine::{
     BaseRevision,
-    framebuffer::Framebuffer,
     request::{
         FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
     },
 };
 use memory::{BootInfoFrameAllocator, init_heap, paging};
-use output::{Display, DisplayWriter, LineWriter, framebuffer::WrappedFrameBuffer};
-use spin::mutex::Mutex;
+use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::VirtAddr;
-
-pub static WRITER: Mutex<Option<LineWriter>> = Mutex::new(None);
-
-/// Initializes the global display writer.
-///
-/// In the future, all fonts might need to be present in order to allow for selection
-pub fn init_writer(framebuffer: &mut Framebuffer) {
-    let wrapped_buffer = WrappedFrameBuffer::new(framebuffer);
-    let display = Display::new(wrapped_buffer);
-    let (font, width, height) =
-        DisplayWriter::select_font_and_dimensions(framebuffer.height() as usize, framebuffer.width() as usize);
-    let font = Box::leak(Box::new(font));
-    let displaywriter = DisplayWriter::new(display, font, width, height);
-
-    *WRITER.lock() = Some(LineWriter::new(displaywriter));
-}
 
 /// Global print! macro that writes to the framebuffer.
 #[macro_export]
@@ -65,11 +46,10 @@ macro_rules! print {
     ($($arg:tt)*) => {
         {
             use core::fmt::Write;
-            use $crate::WRITER;
-            let mut lock = WRITER.lock();
+            use $crate::output::FLANTERM;
+            let mut lock = FLANTERM.lock();
             let writer = lock.as_mut().unwrap();
             let _ = write!(writer, $($arg)*);
-            writer.flush();
         }
     };
 }
@@ -114,7 +94,7 @@ unsafe extern "C" fn kernel_main() -> ! {
     let framebuffer_response = FRAMEBUFFER_REQUEST
         .get_response()
         .expect("framebuffer request failed");
-    let mut framebuffer = framebuffer_response
+    let framebuffer = framebuffer_response
         .framebuffers()
         .next()
         .expect("framebuffer not found");
@@ -123,7 +103,10 @@ unsafe extern "C" fn kernel_main() -> ! {
         panic!("Framebuffer bpp is not a multiple of 8");
     }
     
-    init_writer(&mut framebuffer);
+    flanterm_init(
+        framebuffer.addr() as *mut u32,
+        get_info_from_frambuffer(&framebuffer)
+    );
 
     for i in 0..100 {
         println!("Hello, world! {}", i);
