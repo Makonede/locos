@@ -6,6 +6,7 @@
 //! - `console`: Manages the console display buffer and rendering.
 //! - `framebuffer`: Provides a direct interface to the framebuffer.
 //! - `linewriter`: Implements a simple line-based writer for the console.
+//! - `flanconsole`: Provides a terminal emulator using the flanterm library.
 //!
 //! The main entry points are:
 //!
@@ -15,6 +16,8 @@
 //!   writing characters and strings.
 //! - `Display`: A wrapper around the framebuffer that implements the
 //!   `embedded-graphics` `DrawTarget` trait.
+//! - `FlanConsole`: A terminal emulator that provides ANSI escape sequence
+//!   support and direct framebuffer writing.
 
 pub mod console;
 pub mod framebuffer;
