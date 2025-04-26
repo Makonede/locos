@@ -19,12 +19,7 @@
 //! - `FlanConsole`: A terminal emulator that provides ANSI escape sequence
 //!   support and direct framebuffer writing.
 
-pub mod console;
-pub mod framebuffer;
-pub mod linewriter;
 pub mod flanconsole;
+pub mod framebuffer;
 
-pub use console::DisplayWriter;
-pub use framebuffer::Display;
-pub use linewriter::LineWriter;
 pub use flanconsole::{FlanConsole, flanterm_init, FLANTERM};
