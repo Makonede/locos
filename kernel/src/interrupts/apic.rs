@@ -15,9 +15,9 @@ const LAPIC_TPR_OFFSET: u32 = 0x80;
 /// Must be called after IDT is loaded
 pub unsafe fn setup_apic(mapper: &mut impl Mapper<Size4KiB>, frame_allocator: &mut impl FrameAllocator<Size4KiB>) {
     disable_legacy_pics();
-    enable_apic();
+    enable_lapic();
 
-    let apic_location = get_base_addr();
+    let apic_location = get_lapic_addr();
     unsafe { map_lapic_registers(mapper, frame_allocator, apic_location) };
 
     unsafe {
@@ -52,7 +52,7 @@ unsafe fn map_lapic_registers(mapper: &mut impl Mapper<Size4KiB>, frame_allocato
     }
 }
 
-fn enable_apic() {
+fn enable_lapic() {
     unsafe {
         let mut msr = x86_64::registers::model_specific::Msr::new(0x1B);
         let base = msr.read();
@@ -62,7 +62,7 @@ fn enable_apic() {
     }
 }
 
-fn get_base_addr() -> PhysAddr {
+fn get_lapic_addr() -> PhysAddr {
     unsafe {
         let msr = x86_64::registers::model_specific::Msr::new(IA32_APIC_BASE_MSR);
         let base = msr.read();
