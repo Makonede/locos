@@ -15,7 +15,7 @@ pub static ALLOCATOR: Locked<BuddyAlloc<20, 16>> = Locked::new(BuddyAlloc::new(
     VirtAddr::new(HEAP_START as u64 + HEAP_SIZE as u64),
 ));
 
-pub const HEAP_START: usize = 0x_4444_0000_0000;
+pub const HEAP_START: usize = 0xFFFF_8800_0000_0000;
 pub const HEAP_SIZE: usize = 8 * 1024 * 1024; // 8 MiB
 
 /// Initialize a heap region in virtual memory and map it to physical frames
