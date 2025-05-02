@@ -21,5 +21,6 @@
 
 pub mod flanconsole;
 pub mod framebuffer;
+pub mod macros;
 
 pub use flanconsole::{FlanConsole, flanterm_init, FLANTERM};

@@ -40,34 +40,6 @@ use memory::{BootInfoFrameAllocator, init_heap, paging};
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::VirtAddr;
 
-/// Global print! macro that writes to the framebuffer.
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {
-        {
-            use core::fmt::Write;
-            use $crate::output::FLANTERM;
-            let mut lock = FLANTERM.lock();
-            let writer = lock.as_mut().unwrap();
-            let _ = write!(writer, $($arg)*);
-        }
-    };
-}
-
-/// Global println! macro that writes to the framebuffer.
-#[macro_export]
-macro_rules! println {
-    () => {
-        {
-            $crate::print!("\n");
-        }
-    };
-    ($($arg:tt)*) => {
-        {
-            $crate::print!("{}\n", format_args!($($arg)*));
-        }
-    };
-}
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kernel_main() -> ! {
@@ -111,6 +83,12 @@ unsafe extern "C" fn kernel_main() -> ! {
     for i in 0..100 {
         println!("Hello, world! {}", i);
     }
+
+    info!("Hello, world!");
+    debug!("Hello, world!");
+    warn!("Hello, world!");
+    error!("Hello, world!");
+    trace!("Hello, world!");
 
     hcf();
 }
