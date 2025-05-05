@@ -45,7 +45,9 @@ use x86_64::VirtAddr;
 unsafe extern "C" fn kernel_main() -> ! {
     assert!(BASE_REVISION.is_supported());
     init_gdt();
+    info!("GDT initialized");
     init_idt();
+    info!("IDT initialized");
 
     let memory_regions = MEMORY_MAP_REQUEST
         .get_response()
@@ -62,6 +64,7 @@ unsafe extern "C" fn kernel_main() -> ! {
     unsafe {
         init_heap(&mut offset_allocator, &mut frame_allocator).expect("heap initialization failed");
     }
+    info!("Heap initialized");
 
     let framebuffer_response = FRAMEBUFFER_REQUEST
         .get_response()
@@ -79,16 +82,7 @@ unsafe extern "C" fn kernel_main() -> ! {
         framebuffer.addr() as *mut u32,
         get_info_from_frambuffer(&framebuffer)
     );
-
-    for i in 0..100 {
-        println!("Hello, world! {}", i);
-    }
-
-    info!("Hello, world!");
-    debug!("Hello, world!");
-    warn!("Hello, world!");
-    error!("Hello, world!");
-    trace!("Hello, world!");
+    info!("Console initialized");
 
     hcf();
 }
@@ -118,8 +112,7 @@ static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    serial_println!("{}", info);
-    println!("{}", info);
+    error!("{}", info);
     hcf();
 }
 
