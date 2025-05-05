@@ -8,8 +8,9 @@ macro_rules! print {
             use core::fmt::Write;
             use $crate::output::FLANTERM;
             let mut lock = FLANTERM.lock();
-            let writer = lock.as_mut().unwrap();
-            let _ = write!(writer, $($arg)*);
+            if let Some(writer) = lock.as_mut() {
+                write!(writer, $($arg)*).unwrap();
+            }
         }
     };
 }
@@ -19,6 +20,7 @@ macro_rules! print {
 macro_rules! error {
     ($($arg:tt)*) => {
         $crate::println!("\x1b[31mERROR:\x1b[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("\x1b[31mERROR:\x1b[0m {}", format_args!($($arg)*));
     };
 }
 
@@ -27,6 +29,7 @@ macro_rules! error {
 macro_rules! warn {
     ($($arg:tt)*) => {
         $crate::println!("\x1b[33mWARN:\x1b[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("\x1b[33mWARN:\x1b[0m {}", format_args!($($arg)*));
     };
 }
 
@@ -35,6 +38,7 @@ macro_rules! warn {
 macro_rules! info {
     ($($arg:tt)*) => {
         $crate::println!("\x1b[32mINFO:\x1b[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("\x1b[32mINFO:\x1b[0m {}", format_args!($($arg)*));
     };
 }
 
@@ -43,6 +47,7 @@ macro_rules! info {
 macro_rules! debug {
     ($($arg:tt)*) => {
         $crate::println!("\x1b[32mDEBUG:\x1b[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("\x1b[32mDEBUG:\x1b[0m {}", format_args!($($arg)*));
     };
 }
 
@@ -51,6 +56,7 @@ macro_rules! debug {
 macro_rules! trace {
     ($($arg:tt)*) => {
         $crate::println!("\x1b[36mTRACE:\x1b[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("\x1b[36mTRACE:\x1b[0m {}", format_args!($($arg)*));
     };
 }
 
