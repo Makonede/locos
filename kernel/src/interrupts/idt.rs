@@ -1,4 +1,4 @@
-use conquer_once::spin::Lazy;
+use spin::Lazy;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
 use crate::{println, serial_println};
@@ -8,7 +8,7 @@ use crate::{println, serial_println};
 /// - Breakpoint
 /// - Page Fault
 /// - Double Fault
-static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
+pub static mut IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     let mut idt = InterruptDescriptorTable::new();
     idt.breakpoint.set_handler_fn(breakpoint_handler);
     idt.page_fault.set_handler_fn(page_fault_handler);
@@ -22,7 +22,7 @@ static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
 
 /// Initialize the Interrupt Descriptor Table.
 pub fn init_idt() {
-    IDT.load();
+    unsafe { (*IDT).load() };
 }
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {

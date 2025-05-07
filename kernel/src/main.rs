@@ -29,12 +29,11 @@ extern crate alloc;
 use core::{arch::asm, panic::PanicInfo};
 
 use gdt::init_gdt;
-use interrupts::init_idt;
+use interrupts::{init_idt, setup_apic};
 use limine::{
-    BaseRevision,
     request::{
-        FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
-    },
+        FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker, RsdpRequest,
+    }, BaseRevision
 };
 use memory::{BootInfoFrameAllocator, init_heap, paging};
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
@@ -82,7 +81,18 @@ unsafe extern "C" fn kernel_main() -> ! {
         framebuffer.addr() as *mut u32,
         get_info_from_frambuffer(&framebuffer)
     );
-    info!("Console initialized");
+
+    let rsdp_addr = RSDP_REQUEST
+        .get_response()
+        .expect("RSDP request failed")
+        .address();
+
+    unsafe { setup_apic(rsdp_addr, physical_memory_offset as usize, &mut offset_allocator, &mut frame_allocator) };
+
+    for i in 0..100 {
+        println!("Hello, world! {}", i);
+    }
+
 
     hcf();
 }
@@ -102,6 +112,10 @@ static MEMORY_MAP_REQUEST: MemoryMapRequest = MemoryMapRequest::new();
 #[used]
 #[unsafe(link_section = ".requests")]
 static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static RSDP_REQUEST: RsdpRequest = RsdpRequest::new();
 
 #[used]
 #[unsafe(link_section = ".requests_start_marker")]
