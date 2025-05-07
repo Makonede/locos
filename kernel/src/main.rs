@@ -93,6 +93,7 @@ unsafe extern "C" fn kernel_main() -> ! {
         println!("Hello, world! {}", i);
     }
 
+
     hcf();
 }
 
