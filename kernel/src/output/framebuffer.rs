@@ -43,7 +43,7 @@ pub fn get_info_from_frambuffer(framebuffer: &Framebuffer) -> FramebufferInfo {
         width,
         height,
         pitch,
-        bpp: bpp.div_ceil(8),  // Round up to nearest byte
+        bpp: bpp.div_ceil(8), // Round up to nearest byte
         red_mask_size: framebuffer.red_mask_size(),
         green_mask_size: framebuffer.green_mask_size(),
         blue_mask_size: framebuffer.blue_mask_size(),

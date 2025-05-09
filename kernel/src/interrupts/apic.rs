@@ -1,8 +1,18 @@
-use acpi::{handler::PhysicalMapping, AcpiHandler, AcpiTables, InterruptModel};
-use core::ptr::NonNull;
-use x86_64::{registers::model_specific::Msr, structures::{idt::InterruptStackFrame, paging::{FrameAllocator, Mapper, Page, PageTableFlags, PhysFrame, Size4KiB}}, PhysAddr, VirtAddr};
-use x2apic::{ioapic::{IrqFlags, IrqMode, RedirectionTableEntry}, lapic::{xapic_base, LocalApicBuilder}};
+use acpi::{AcpiHandler, AcpiTables, InterruptModel, handler::PhysicalMapping};
 use alloc::vec::Vec;
+use core::ptr::NonNull;
+use x2apic::{
+    ioapic::{IrqFlags, IrqMode, RedirectionTableEntry},
+    lapic::{LocalApicBuilder, xapic_base},
+};
+use x86_64::{
+    PhysAddr, VirtAddr,
+    registers::model_specific::Msr,
+    structures::{
+        idt::InterruptStackFrame,
+        paging::{Mapper, Page, PageTableFlags, PhysFrame, Size4KiB},
+    },
+};
 
 use crate::memory::{FRAME_ALLOCATOR, PAGE_TABLE};
 
@@ -21,10 +31,10 @@ const IOAPIC_TIMER_VECTOR: u8 = 0x20;
 const IOAPIC_TIMER_INPUT: u8 = 0;
 
 /// Sets up the Local APIC and enables it using the x2apic crate.
-/// 
+///
 /// # Safety
 /// Must be called after IDT is loaded
-pub unsafe fn setup_apic(rsdp_addr: usize, memory_offset: usize) {
+pub unsafe fn setup_apic(rsdp_addr: usize) {
     disable_legacy_pics();
 
     let mut builder = LocalApicBuilder::new();
@@ -36,7 +46,10 @@ pub unsafe fn setup_apic(rsdp_addr: usize, memory_offset: usize) {
     match detect_lapic_support() {
         ApicSupport::XApic => {
             let lapic_base = unsafe { xapic_base() };
-            map_lapic_registers(PhysAddr::new(lapic_base), VirtAddr::new(XAPIC_VIRTUAL_START));
+            map_lapic_registers(
+                PhysAddr::new(lapic_base),
+                VirtAddr::new(XAPIC_VIRTUAL_START),
+            );
             lapic = lapic.set_xapic_base(XAPIC_VIRTUAL_START);
         }
         ApicSupport::None => {
@@ -45,9 +58,7 @@ pub unsafe fn setup_apic(rsdp_addr: usize, memory_offset: usize) {
         ApicSupport::X2Apic => (),
     }
 
-    let mut final_lapic = lapic
-        .build()
-        .unwrap();
+    let mut final_lapic = lapic.build().unwrap();
 
     unsafe { final_lapic.enable() };
 
@@ -57,14 +68,17 @@ pub unsafe fn setup_apic(rsdp_addr: usize, memory_offset: usize) {
         panic!("No IO APIC found");
     }
 
-    for (virtaddr, &(ioapic_mmio, _)) in (IOAPICS_VIRTUAL_START..).step_by(PAGE_SIZE).zip(ioapic_addrs.iter()) {
+    for (virtaddr, &(ioapic_mmio, _)) in (IOAPICS_VIRTUAL_START..)
+        .step_by(PAGE_SIZE)
+        .zip(ioapic_addrs.iter())
+    {
         let virtaddr = VirtAddr::new(virtaddr);
         let ioapic_mmio = PhysAddr::new(ioapic_mmio as u64);
 
         // Map the IO APIC MMIO region to the virtual address space
         unsafe { map_ioapic(ioapic_mmio, virtaddr) };
     }
-    
+
     let mut ioapics = Vec::with_capacity(ioapic_addrs.len());
     for (i, &(_, gsi_base)) in ioapic_addrs.iter().enumerate() {
         ioapics.push((
@@ -77,7 +91,10 @@ pub unsafe fn setup_apic(rsdp_addr: usize, memory_offset: usize) {
 }
 
 #[allow(static_mut_refs)]
-fn setup_ioapic_timer(ioapics: &mut [(x2apic::ioapic::IoApic, u32)], lapic: &x2apic::lapic::LocalApic) {
+fn setup_ioapic_timer(
+    ioapics: &mut [(x2apic::ioapic::IoApic, u32)],
+    lapic: &x2apic::lapic::LocalApic,
+) {
     for (ioapic, gsi_base) in ioapics.iter_mut() {
         if *gsi_base != 0 {
             continue;
@@ -91,10 +108,7 @@ fn setup_ioapic_timer(ioapics: &mut [(x2apic::ioapic::IoApic, u32)], lapic: &x2a
         unsafe { ioapic.set_table_entry(IOAPIC_TIMER_INPUT, entry) };
     }
 
-    unsafe {
-        (*IDT.as_mut_ptr())[LAPIC_TIMER_VECTOR]
-            .set_handler_fn(lapic_timer_handler)
-    };
+    unsafe { (*IDT.as_mut_ptr())[LAPIC_TIMER_VECTOR].set_handler_fn(lapic_timer_handler) };
 
     for (ioapic, gsi_base) in ioapics.iter_mut() {
         if *gsi_base != 0 {
@@ -109,17 +123,26 @@ extern "x86-interrupt" fn lapic_timer_handler(_stack_frame: InterruptStackFrame)
 }
 
 /// Maps the IO apic memory adress to the virtual address space.
-/// 
+///
 /// # Safety
 /// Fundamentally unsafe due to mapping pages
 unsafe fn map_ioapic(ioapic_mmio: PhysAddr, virtaddr: VirtAddr) {
     unsafe {
-        PAGE_TABLE.lock().as_mut().unwrap().map_to( 
-            Page::<Size4KiB>::containing_address(virtaddr),
-            PhysFrame::containing_address(ioapic_mmio),
-            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_CACHE | PageTableFlags::NO_EXECUTE,
-            FRAME_ALLOCATOR.lock().as_mut().unwrap(),
-        ).expect("failed to map io apic").flush();
+        PAGE_TABLE
+            .lock()
+            .as_mut()
+            .unwrap()
+            .map_to(
+                Page::<Size4KiB>::containing_address(virtaddr),
+                PhysFrame::containing_address(ioapic_mmio),
+                PageTableFlags::PRESENT
+                    | PageTableFlags::WRITABLE
+                    | PageTableFlags::NO_CACHE
+                    | PageTableFlags::NO_EXECUTE,
+                FRAME_ALLOCATOR.lock().as_mut().unwrap(),
+            )
+            .expect("failed to map io apic")
+            .flush();
     }
 }
 /// Minimal handler for ACPI physical memory mapping.
@@ -152,9 +175,13 @@ impl AcpiHandler for KernelAcpiHandler {
 
         // Lock and get page table and frame allocator.
         let mut page_table_guard = PAGE_TABLE.lock();
-        let page_table = page_table_guard.as_mut().expect("PAGE_TABLE not initialized");
+        let page_table = page_table_guard
+            .as_mut()
+            .expect("PAGE_TABLE not initialized");
         let mut frame_allocator_guard = FRAME_ALLOCATOR.lock();
-        let frame_allocator = frame_allocator_guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
+        let frame_allocator = frame_allocator_guard
+            .as_mut()
+            .expect("FRAME_ALLOCATOR not initialized");
 
         let flags = PageTableFlags::PRESENT
             | PageTableFlags::WRITABLE
@@ -164,25 +191,31 @@ impl AcpiHandler for KernelAcpiHandler {
         // Map each page in the region.
         for i in 0..num_pages {
             let virt = VirtAddr::new(virt_base + (i as u64) * PAGE_SIZE as u64);
-            let phys = PhysAddr::new((phys_addr & !(PAGE_SIZE as u64 - 1)) + (i as u64) * PAGE_SIZE as u64);
+            let phys = PhysAddr::new(
+                (phys_addr & !(PAGE_SIZE as u64 - 1)) + (i as u64) * PAGE_SIZE as u64,
+            );
             let page = Page::<Size4KiB>::containing_address(virt);
             let frame = PhysFrame::containing_address(phys);
             // Safety: mapping physical memory, must ensure no overlap.
-            unsafe { page_table
-                .map_to(page, frame, flags, frame_allocator)
-                .expect("failed to map ACPI region")
-                .flush() };
+            unsafe {
+                page_table
+                    .map_to(page, frame, flags, frame_allocator)
+                    .expect("failed to map ACPI region")
+                    .flush()
+            };
         }
 
         let virt_addr = virt_base + offset as u64;
 
-        unsafe { PhysicalMapping::new(
-            physical_address,
-            NonNull::new(virt_addr as *mut T).expect("Null virtual address in ACPI mapping"),
-            size,
-            num_pages * PAGE_SIZE,
-            *self,
-        ) }
+        unsafe {
+            PhysicalMapping::new(
+                physical_address,
+                NonNull::new(virt_addr as *mut T).expect("Null virtual address in ACPI mapping"),
+                size,
+                num_pages * PAGE_SIZE,
+                *self,
+            )
+        }
     }
     fn unmap_physical_region<T>(_region: &PhysicalMapping<Self, T>) {}
 }
@@ -202,19 +235,23 @@ fn get_ioapic_info(rsdp_addr: usize) -> Vec<(u32, u32)> {
     ioapic_addrs
 }
 
-fn map_lapic_registers(
-    lapic_mmio: PhysAddr,
-    virtaddr: VirtAddr,
-) {
+fn map_lapic_registers(lapic_mmio: PhysAddr, virtaddr: VirtAddr) {
     unsafe {
-        PAGE_TABLE.lock().as_mut().unwrap().map_to(
-            Page::<Size4KiB>::containing_address(virtaddr),
-            PhysFrame::containing_address(lapic_mmio),
-            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_CACHE | PageTableFlags::NO_EXECUTE,
-            FRAME_ALLOCATOR.lock().as_mut().unwrap(),
-        )
-        .expect("failed to map lapic")
-        .flush();
+        PAGE_TABLE
+            .lock()
+            .as_mut()
+            .unwrap()
+            .map_to(
+                Page::<Size4KiB>::containing_address(virtaddr),
+                PhysFrame::containing_address(lapic_mmio),
+                PageTableFlags::PRESENT
+                    | PageTableFlags::WRITABLE
+                    | PageTableFlags::NO_CACHE
+                    | PageTableFlags::NO_EXECUTE,
+                FRAME_ALLOCATOR.lock().as_mut().unwrap(),
+            )
+            .expect("failed to map lapic")
+            .flush();
     }
 }
 

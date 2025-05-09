@@ -31,13 +31,21 @@ pub unsafe fn init_heap() -> Result<(), MapToError<Size4KiB>> {
 
     // Map all pages in the heap
     for page in Page::range_inclusive(heap_start, heap_end) {
-        let frame = FRAME_ALLOCATOR.lock().as_mut().unwrap()
+        let frame = FRAME_ALLOCATOR
+            .lock()
+            .as_mut()
+            .unwrap()
             .allocate_frame()
             .ok_or(MapToError::FrameAllocationFailed)?;
 
         let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
         unsafe {
-            PAGE_TABLE.lock().as_mut().unwrap().map_to(page, frame, flags, FRAME_ALLOCATOR.lock().as_mut().unwrap())?.flush();
+            PAGE_TABLE
+                .lock()
+                .as_mut()
+                .unwrap()
+                .map_to(page, frame, flags, FRAME_ALLOCATOR.lock().as_mut().unwrap())?
+                .flush();
         }
     }
 

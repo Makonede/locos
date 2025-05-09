@@ -14,7 +14,7 @@ pub struct BootInfoFrameAllocator<'a> {
     next: usize,
 }
 
-impl<'a> BootInfoFrameAllocator<'a> {
+impl BootInfoFrameAllocator<'_> {
     /// Initializes a new frame allocator with the given memory map.
     ///
     /// # Safety
@@ -42,7 +42,7 @@ impl<'a> BootInfoFrameAllocator<'a> {
 }
 
 /// Implement the FrameAllocator from `x86_64`` trait for BootInfoFrameAllocator.
-unsafe impl<'a> FrameAllocator<Size4KiB> for BootInfoFrameAllocator<'a> {
+unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator<'_> {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
         let frame = self.usable_frames().nth(self.next);
         self.next += 1;
@@ -60,7 +60,9 @@ pub unsafe fn init_frame_allocator(memory_map: &'static [&'static Entry]) {
     if FRAME_ALLOCATOR.lock().is_some() {
         panic!("Frame allocator already initialized");
     }
-    FRAME_ALLOCATOR.lock().replace(unsafe { BootInfoFrameAllocator::init(memory_map) });
+    FRAME_ALLOCATOR
+        .lock()
+        .replace(unsafe { BootInfoFrameAllocator::init(memory_map) });
 }
 
 /// Initializes a new OffsetPageTable with the given memory offset.
@@ -72,7 +74,9 @@ pub unsafe fn init(memory_offset: VirtAddr) {
     if PAGE_TABLE.lock().is_some() {
         panic!("Page table already initialized");
     }
-    PAGE_TABLE.lock().replace(unsafe { OffsetPageTable::new(level_4_table, memory_offset) });
+    PAGE_TABLE
+        .lock()
+        .replace(unsafe { OffsetPageTable::new(level_4_table, memory_offset) });
 }
 
 /// Get a reference to the start of the level 4 page table in virtual memory.

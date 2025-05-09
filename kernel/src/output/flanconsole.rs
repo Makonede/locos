@@ -5,7 +5,7 @@
 //! - Direct framebuffer writing
 //! - ANSI escape sequence support
 //! - Safe Rust interface around the unsafe flanterm C library
-//! 
+//!
 //! The main components are:
 //! - `FlanConsole`: The main terminal emulator struct that implements `Write`
 //! - `FLANTERM`: A global static instance accessible throughout the kernel
@@ -19,7 +19,7 @@ use spin::Mutex;
 use super::framebuffer::FramebufferInfo;
 
 /// Global terminal instance protected by a mutex.
-/// 
+///
 /// This static is initialized by `flanterm_init` and can be accessed
 /// throughout the kernel for terminal operations.
 pub static FLANTERM: Mutex<Option<FlanConsole>> = Mutex::new(None);
@@ -75,11 +75,7 @@ impl FlanConsole {
     /// * `text` - The text to print to the terminal
     pub fn _print(&mut self, text: &str) {
         unsafe {
-            flanterm_write(
-                self.context,
-                text.as_ptr() as *const i8,
-                text.len(),
-            );
+            flanterm_write(self.context, text.as_ptr() as *const i8, text.len());
         }
     }
 }

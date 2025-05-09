@@ -31,14 +31,15 @@ use core::{arch::asm, panic::PanicInfo};
 use gdt::init_gdt;
 use interrupts::{init_idt, setup_apic};
 use limine::{
+    BaseRevision,
     request::{
-        FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker, RsdpRequest,
-    }, BaseRevision
+        FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
+        RsdpRequest,
+    },
 };
-use memory::{init_frame_allocator, init_heap, paging, BootInfoFrameAllocator};
+use memory::{init_frame_allocator, init_heap, paging};
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::VirtAddr;
-
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kernel_main() -> ! {
@@ -76,10 +77,10 @@ unsafe extern "C" fn kernel_main() -> ! {
     if framebuffer.bpp() % 8 != 0 {
         panic!("Framebuffer bpp is not a multiple of 8");
     }
-    
+
     flanterm_init(
         framebuffer.addr() as *mut u32,
-        get_info_from_frambuffer(&framebuffer)
+        get_info_from_frambuffer(&framebuffer),
     );
 
     let rsdp_addr = RSDP_REQUEST
@@ -87,12 +88,11 @@ unsafe extern "C" fn kernel_main() -> ! {
         .expect("RSDP request failed")
         .address();
 
-    unsafe { setup_apic(rsdp_addr, physical_memory_offset as usize) };
+    unsafe { setup_apic(rsdp_addr) };
 
     for i in 0..100 {
         println!("Hello, world! {}", i);
     }
-
 
     hcf();
 }

@@ -3,4 +3,4 @@ pub mod paging;
 
 pub use alloc::init_heap;
 pub use paging::BootInfoFrameAllocator;
-pub use paging::{init, init_frame_allocator, FRAME_ALLOCATOR, PAGE_TABLE};
+pub use paging::{FRAME_ALLOCATOR, PAGE_TABLE, init, init_frame_allocator};
