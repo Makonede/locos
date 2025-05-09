@@ -96,6 +96,11 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
 }
 
 #[allow(static_mut_refs)]
+/// Configures the IOAPIC timer and sets up the LAPIC timer interrupt handler.
+///
+/// This function masks the IOAPIC timer, assigns the interrupt vector,
+/// and enables the IRQ for the timer input. It also installs the LAPIC timer handler
+/// in the IDT.
 fn setup_ioapic_timer(
     ioapics: &mut [(x2apic::ioapic::IoApic, u32)],
     lapic: &x2apic::lapic::LocalApic,
@@ -125,10 +130,17 @@ fn setup_ioapic_timer(
     debug!("IOAPIC timer setup");
 }
 
+/// Interrupt handler for the LAPIC timer.
+///
+/// Acknowledges the interrupt by writing to the EOI MSR.
 extern "x86-interrupt" fn lapic_timer_handler(_stack_frame: InterruptStackFrame) {
     unsafe { Msr::new(X2APIC_EOI_MSR).write(0) };
 }
 
+/// Maps the IO apic memory adress to the virtual address space.
+///
+/// # Safety
+/// Fundamentally unsafe due to mapping pages
 /// Maps the IO apic memory adress to the virtual address space.
 ///
 /// # Safety
@@ -229,6 +241,13 @@ impl AcpiHandler for KernelAcpiHandler {
 
 /// Get IO APIC physical addresses using ACPI.
 /// returns a tuple of (address, global_system_interrupt_base)
+/// Retrieves IO APIC physical addresses using ACPI tables.
+///
+/// # Arguments
+/// * `rsdp_addr` - The physical address of the ACPI RSDP structure.
+///
+/// # Returns
+/// A vector of tuples containing (IOAPIC address, global system interrupt base).
 fn get_ioapic_info(rsdp_addr: usize) -> Vec<(u32, u32)> {
     let tables = unsafe { AcpiTables::from_rsdp(KernelAcpiHandler, rsdp_addr).unwrap() };
     let platform_info = tables.platform_info().unwrap();
@@ -242,6 +261,10 @@ fn get_ioapic_info(rsdp_addr: usize) -> Vec<(u32, u32)> {
     ioapic_addrs
 }
 
+/// Maps the LAPIC registers to the virtual address space.
+///
+/// # Safety
+/// This function is unsafe because it manipulates page tables and maps physical memory.
 fn map_lapic_registers(lapic_mmio: PhysAddr, virtaddr: VirtAddr) {
     unsafe {
         PAGE_TABLE
@@ -263,12 +286,19 @@ fn map_lapic_registers(lapic_mmio: PhysAddr, virtaddr: VirtAddr) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Represents the supported APIC modes on this system.
 enum ApicSupport {
+    /// x2APIC mode is supported.
     X2Apic,
+    /// xAPIC mode is supported.
     XApic,
+    /// No APIC support detected.
     None,
 }
 
+/// Detects the available Local APIC support on the current processor.
+///
+/// Returns the type of APIC supported (x2APIC, xAPIC, or none).
 fn detect_lapic_support() -> ApicSupport {
     let mut ecx: u32;
     let mut edx: u32;
