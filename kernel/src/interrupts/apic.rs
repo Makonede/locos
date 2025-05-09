@@ -142,9 +142,6 @@ extern "x86-interrupt" fn lapic_timer_handler(_stack_frame: InterruptStackFrame)
 /// # Safety
 /// Fundamentally unsafe due to mapping pages
 /// Maps the IO apic memory adress to the virtual address space.
-///
-/// # Safety
-/// Fundamentally unsafe due to mapping pages
 unsafe fn map_ioapic(ioapic_mmio: PhysAddr, virtaddr: VirtAddr) {
     unsafe {
         PAGE_TABLE
