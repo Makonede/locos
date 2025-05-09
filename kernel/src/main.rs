@@ -35,7 +35,7 @@ use limine::{
         FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker, RsdpRequest,
     }, BaseRevision
 };
-use memory::{BootInfoFrameAllocator, init_heap, paging};
+use memory::{init_frame_allocator, init_heap, paging, BootInfoFrameAllocator};
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::VirtAddr;
 
@@ -52,16 +52,16 @@ unsafe extern "C" fn kernel_main() -> ! {
         .get_response()
         .expect("memory map request failed")
         .entries();
-    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(memory_regions) };
+    unsafe { init_frame_allocator(memory_regions) };
 
     let physical_memory_offset = HHDM_REQUEST
         .get_response()
         .expect("Hhdm request failed")
         .offset();
-    let mut offset_allocator = unsafe { paging::init(VirtAddr::new(physical_memory_offset)) };
+    unsafe { paging::init(VirtAddr::new(physical_memory_offset)) };
 
     unsafe {
-        init_heap(&mut offset_allocator, &mut frame_allocator).expect("heap initialization failed");
+        init_heap().expect("heap initialization failed");
     }
     info!("Heap initialized");
 
@@ -87,7 +87,7 @@ unsafe extern "C" fn kernel_main() -> ! {
         .expect("RSDP request failed")
         .address();
 
-    unsafe { setup_apic(rsdp_addr, physical_memory_offset as usize, &mut offset_allocator, &mut frame_allocator) };
+    unsafe { setup_apic(rsdp_addr, physical_memory_offset as usize) };
 
     for i in 0..100 {
         println!("Hello, world! {}", i);

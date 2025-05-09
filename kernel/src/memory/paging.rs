@@ -1,8 +1,12 @@
 use limine::memory_map::{Entry, EntryType};
+use spin::Mutex;
 use x86_64::{
     VirtAddr,
     structures::paging::{FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB},
 };
+
+pub static FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
+pub static PAGE_TABLE: Mutex<Option<OffsetPageTable>> = Mutex::new(None);
 
 /// A frame allocator that returns frames from the memory regions provided by the bootloader.
 pub struct BootInfoFrameAllocator<'a> {
@@ -46,13 +50,29 @@ unsafe impl<'a> FrameAllocator<Size4KiB> for BootInfoFrameAllocator<'a> {
     }
 }
 
+///
+/// Initializes the global frame allocator using the provided memory map.
+///
+/// # Safety
+/// The caller must ensure that the memory map is valid and not used elsewhere.
+/// This function must only be called once, before any frame allocations occur.
+pub unsafe fn init_frame_allocator(memory_map: &'static [&'static Entry]) {
+    if FRAME_ALLOCATOR.lock().is_some() {
+        panic!("Frame allocator already initialized");
+    }
+    FRAME_ALLOCATOR.lock().replace(unsafe { BootInfoFrameAllocator::init(memory_map) });
+}
+
 /// Initializes a new OffsetPageTable with the given memory offset.
 ///
 /// # Safety
 /// This function is unsafe because the caller must ensure that the memory offset is valid and that the virtual memory is mapped correctly.
-pub unsafe fn init(memory_offset: VirtAddr) -> OffsetPageTable<'static> {
+pub unsafe fn init(memory_offset: VirtAddr) {
     let level_4_table = unsafe { get_level_4_table(memory_offset) };
-    unsafe { OffsetPageTable::new(level_4_table, memory_offset) }
+    if PAGE_TABLE.lock().is_some() {
+        panic!("Page table already initialized");
+    }
+    PAGE_TABLE.lock().replace(unsafe { OffsetPageTable::new(level_4_table, memory_offset) });
 }
 
 /// Get a reference to the start of the level 4 page table in virtual memory.

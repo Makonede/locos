@@ -9,6 +9,8 @@ use x86_64::{
     },
 };
 
+use super::{FRAME_ALLOCATOR, PAGE_TABLE};
+
 #[global_allocator]
 pub static ALLOCATOR: Locked<BuddyAlloc<20, 16>> = Locked::new(BuddyAlloc::new(
     VirtAddr::new(HEAP_START as u64),
@@ -23,22 +25,19 @@ pub const HEAP_SIZE: usize = 8 * 1024 * 1024; // 8 MiB
 /// # Safety
 /// This function is unsafe because the caller must guarantee that the
 /// given memory region is unused and that the frame allocator is valid
-pub unsafe fn init_heap(
-    mapper: &mut impl Mapper<Size4KiB>,
-    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
-) -> Result<(), MapToError<Size4KiB>> {
+pub unsafe fn init_heap() -> Result<(), MapToError<Size4KiB>> {
     let heap_start = Page::containing_address(VirtAddr::new(HEAP_START as u64));
     let heap_end = Page::containing_address(VirtAddr::new((HEAP_START + HEAP_SIZE - 1) as u64));
 
     // Map all pages in the heap
     for page in Page::range_inclusive(heap_start, heap_end) {
-        let frame = frame_allocator
+        let frame = FRAME_ALLOCATOR.lock().as_mut().unwrap()
             .allocate_frame()
             .ok_or(MapToError::FrameAllocationFailed)?;
 
         let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
         unsafe {
-            mapper.map_to(page, frame, flags, frame_allocator)?.flush();
+            PAGE_TABLE.lock().as_mut().unwrap().map_to(page, frame, flags, FRAME_ALLOCATOR.lock().as_mut().unwrap())?.flush();
         }
     }
 

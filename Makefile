@@ -2,7 +2,7 @@
 MAKEFLAGS += -rR
 .SUFFIXES:
 
-override QEMUFLAGS := -m 2G -serial stdio -no-reboot -no-shutdown
+override QEMUFLAGS := -m 2G -serial stdio -no-reboot -no-shutdown -enable-kvm -smp 2 -cpu host,+x2apic -machine q35,accel=kvm
 
 override IMAGE_NAME := locos
 
