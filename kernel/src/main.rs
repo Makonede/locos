@@ -88,6 +88,7 @@ unsafe extern "C" fn kernel_main() -> ! {
         .address();
 
     unsafe { setup_apic(rsdp_addr) };
+    x86_64::instructions::interrupts::enable();
 
     print_welcome();
 

@@ -1,5 +1,5 @@
-use crate::info;
-use acpi::{AcpiHandler, AcpiTables, InterruptModel, handler::PhysicalMapping};
+use crate::{info, trace};
+use acpi::{handler::PhysicalMapping, madt::{InterruptSourceOverrideEntry, Madt, MadtEntry}, platform::interrupt, AcpiHandler, AcpiTables, InterruptModel};
 use alloc::vec::Vec;
 use core::ptr::NonNull;
 use x2apic::{
@@ -7,12 +7,10 @@ use x2apic::{
     lapic::{LocalApicBuilder, xapic_base},
 };
 use x86_64::{
-    PhysAddr, VirtAddr,
-    registers::model_specific::Msr,
-    structures::{
+    instructions::{interrupts, port::Port}, registers::model_specific::Msr, structures::{
         idt::InterruptStackFrame,
         paging::{Mapper, Page, PageTableFlags, PhysFrame, Size4KiB},
-    },
+    }, PhysAddr, VirtAddr
 };
 
 use crate::{
@@ -28,11 +26,12 @@ const X2APIC_EOI_MSR: u32 = 0x80B;
 const IOAPICS_VIRTUAL_START: u64 = 0xFFFF_F000_0000_0000;
 const XAPIC_VIRTUAL_START: u64 = 0xFFFF_F100_0000_0000;
 const ACPI_MAPPINGS_START: u64 = 0xFFFF_F200_0000_0000;
-const LAPIC_TIMER_VECTOR: u8 = 0x20;
-const LAPIC_ERROR_VECTOR: u8 = 0x21;
+const LAPIC_TIMER_VECTOR: u8 = 0x30;
+const LAPIC_ERROR_VECTOR: u8 = 0x31;
 const LAPIC_SPURIOUS_VECTOR: u8 = 0xFF;
 const IOAPIC_TIMER_VECTOR: u8 = 0x20;
 const IOAPIC_TIMER_INPUT: u8 = 0;
+const TIMER_RELOAD: u16 = (1193182u32 / 20) as u16;
 
 /// Sets up the Local APIC and enables it using the x2apic crate.
 ///
@@ -67,7 +66,8 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
     unsafe { final_lapic.enable() };
 
     // IO apic
-    let ioapic_addrs = get_ioapic_info(rsdp_addr);
+    let mut tables = unsafe { AcpiTables::from_rsdp(KernelAcpiHandler, rsdp_addr).unwrap() };
+    let ioapic_addrs = get_ioapic_info(&mut tables);
     if ioapic_addrs.is_empty() {
         panic!("No IO APIC found");
     }
@@ -91,7 +91,20 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
         ));
     }
 
-    setup_ioapic_timer(&mut ioapics, &final_lapic);
+    let mut interrupt_source_overrides = get_interrupt_source_overrides(&mut tables);
+    let timer_override = interrupt_source_overrides
+        .iter_mut()
+        .find(|x| x.irq == IOAPIC_TIMER_INPUT);
+
+    let timer_gsi = if let Some(timer_override) = timer_override {
+        timer_override.global_system_interrupt 
+    } else {
+        IOAPIC_TIMER_INPUT as u32
+    };
+
+    unsafe { setup_pit_timer(TIMER_RELOAD); }
+    setup_ioapic_timer(&mut ioapics, timer_gsi, unsafe { final_lapic.id() } as u8);
+
     info!("apic initialized with {} IO APICs", ioapic_addrs.len());
 }
 
@@ -100,41 +113,74 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
 ///
 /// This function masks the IOAPIC timer, assigns the interrupt vector,
 /// and enables the IRQ for the timer input. It also installs the LAPIC timer handler
-/// in the IDT.
+/// in the IDT and enabled the PIT.
 fn setup_ioapic_timer(
     ioapics: &mut [(x2apic::ioapic::IoApic, u32)],
-    lapic: &x2apic::lapic::LocalApic,
+    timer_gsi: u32,
+    lapic_id: u8,
 ) {
     for (ioapic, gsi_base) in ioapics.iter_mut() {
-        if *gsi_base != 0 {
+        if !(*gsi_base..*gsi_base + unsafe { ioapic.max_table_entry() } as u32 + 1).contains(&timer_gsi) {
             continue;
         }
         let mut entry = RedirectionTableEntry::default();
         entry.set_vector(IOAPIC_TIMER_VECTOR);
-        entry.set_dest(unsafe { lapic.id() } as u8);
+        entry.set_dest(lapic_id);
         entry.set_mode(IrqMode::Fixed);
         entry.set_flags(IrqFlags::MASKED); // mask it
 
-        unsafe { ioapic.set_table_entry(IOAPIC_TIMER_INPUT, entry) };
+        unsafe { ioapic.set_table_entry((timer_gsi - *gsi_base) as u8, entry) };
     }
 
-    unsafe { (*IDT.as_mut_ptr())[LAPIC_TIMER_VECTOR].set_handler_fn(lapic_timer_handler) };
+    unsafe { 
+        (*IDT.as_mut_ptr())[IOAPIC_TIMER_VECTOR]
+            .set_handler_fn(ioapic_timer_handler)
+            .set_stack_index(crate::gdt::TIMER_IST_INDEX); 
+    };
 
     for (ioapic, gsi_base) in ioapics.iter_mut() {
-        if *gsi_base != 0 {
+        if !(*gsi_base..*gsi_base + unsafe { ioapic.max_table_entry() } as u32 + 1).contains(&timer_gsi) {
             continue;
         }
-        unsafe { ioapic.enable_irq(IOAPIC_TIMER_INPUT) };
+        unsafe { ioapic.enable_irq((timer_gsi - *gsi_base) as u8) };
     }
 
     debug!("IOAPIC timer setup");
 }
 
-/// Interrupt handler for the LAPIC timer.
+/// Interrupt handler for the PIT.
 ///
 /// Acknowledges the interrupt by writing to the EOI MSR.
-extern "x86-interrupt" fn lapic_timer_handler(_stack_frame: InterruptStackFrame) {
-    unsafe { Msr::new(X2APIC_EOI_MSR).write(0) };
+extern "x86-interrupt" fn ioapic_timer_handler(_stack_frame: InterruptStackFrame) {
+    unsafe { 
+        Msr::new(X2APIC_EOI_MSR).write(0);
+    };
+}
+
+/// Set up the PIT (Programmable Interval Timer) channel 0 in mode 2 (rate generator).
+unsafe fn setup_pit_timer(reload: u16) {
+    let mut pit_mode_port = Port::<u8>::new(0x43);
+    let mut pit_data_port = Port::<u8>::new(0x40);
+
+    unsafe {
+        pit_mode_port.write(0b00110100); // channel 0, mode 2 (rate generator), binary
+        pit_data_port.write((reload & 0xFF) as u8); // Low byte
+        pit_data_port.write((reload >> 8) as u8); // High byte
+    }
+}
+
+fn get_interrupt_source_overrides(tables: &mut AcpiTables<KernelAcpiHandler>) -> Vec<InterruptSourceOverrideEntry> {
+    let pin = tables.find_table::<Madt>().unwrap();
+    let madt = pin.get();
+    madt.entries()
+        .filter_map(|x| {
+            if let MadtEntry::InterruptSourceOverride(iso) = x {
+                Some(*iso)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Maps the IO apic memory adress to the virtual address space.
@@ -245,8 +291,7 @@ impl AcpiHandler for KernelAcpiHandler {
 ///
 /// # Returns
 /// A vector of tuples containing (IOAPIC address, global system interrupt base).
-fn get_ioapic_info(rsdp_addr: usize) -> Vec<(u32, u32)> {
-    let tables = unsafe { AcpiTables::from_rsdp(KernelAcpiHandler, rsdp_addr).unwrap() };
+fn get_ioapic_info(tables: &mut AcpiTables<KernelAcpiHandler>) -> Vec<(u32, u32)> {
     let platform_info = tables.platform_info().unwrap();
 
     let mut ioapic_addrs = Vec::new();

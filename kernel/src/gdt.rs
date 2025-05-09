@@ -9,6 +9,7 @@ use x86_64::{
 };
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
+pub const TIMER_IST_INDEX: u16 = 1;
 
 /// The Global Descriptor Table and its selectors.
 static GDT: Lazy<(GlobalDescriptorTable, Selectors)> = Lazy::new(|| {
@@ -56,11 +57,17 @@ static TSS: Lazy<TaskStateSegment> = Lazy::new(|| {
     tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
         const STACK_SIZE: usize = 4096 * 5;
         static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
-
         let stack_start = VirtAddr::from_ptr(&raw const STACK);
-
         stack_start + STACK_SIZE as u64
     };
+
+    tss.interrupt_stack_table[TIMER_IST_INDEX as usize] = {
+        const STACK_SIZE: usize = 4096 * 5;
+        static mut TIMER_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+        let stack_start = VirtAddr::from_ptr(&raw const TIMER_STACK);
+        stack_start + STACK_SIZE as u64
+    };
+
     info!("tss initialized");
     tss
 });
