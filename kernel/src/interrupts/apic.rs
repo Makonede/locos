@@ -13,6 +13,7 @@ const X2APIC_EOI_MSR: u32 = 0x80B;
 
 const IOAPICS_VIRTUAL_START: u64 = 0xFFFF_F000_0000_0000;
 const XAPIC_VIRTUAL_START: u64 = 0xFFFF_F100_0000_0000;
+const ACPI_MAPPINGS_START: u64 = 0xFFFF_F200_0000_0000;
 const LAPIC_TIMER_VECTOR: u8 = 0x20;
 const LAPIC_ERROR_VECTOR: u8 = 0x21;
 const LAPIC_SPURIOUS_VECTOR: u8 = 0xFF;
@@ -51,7 +52,7 @@ pub unsafe fn setup_apic(rsdp_addr: usize, memory_offset: usize) {
     unsafe { final_lapic.enable() };
 
     // IO apic
-    let ioapic_addrs = get_ioapic_info(rsdp_addr, memory_offset);
+    let ioapic_addrs = get_ioapic_info(rsdp_addr);
     if ioapic_addrs.is_empty() {
         panic!("No IO APIC found");
     }
@@ -123,27 +124,63 @@ unsafe fn map_ioapic(ioapic_mmio: PhysAddr, virtaddr: VirtAddr) {
 }
 /// Minimal handler for ACPI physical memory mapping.
 #[derive(Clone, Copy)]
-pub struct KernelAcpiHandler{
-    memory_offset: usize,
-}
-
-impl KernelAcpiHandler {
-    pub fn new(memory_offset: usize) -> Self {
-        KernelAcpiHandler { memory_offset }
-    }
-}
+pub struct KernelAcpiHandler;
 
 impl AcpiHandler for KernelAcpiHandler {
+    /// Maps a physical memory region for ACPI use.
+    /// # Safety
+    /// This function is unsafe due to raw pointer and static mut usage.
     unsafe fn map_physical_region<T>(
         &self,
         physical_address: usize,
         size: usize,
     ) -> PhysicalMapping<Self, T> {
+        // Use static mut for next available virtual address (single-threaded assumption).
+        static mut NEXT_ACPI_VIRT: u64 = ACPI_MAPPINGS_START;
+
+        let phys_addr = physical_address as u64;
+        let offset = (phys_addr & (PAGE_SIZE as u64 - 1)) as usize;
+        let total_size = offset + size;
+        let num_pages = total_size.div_ceil(PAGE_SIZE);
+
+        // Allocate a contiguous virtual region for the mapping.
+        let virt_base = {
+            let addr = unsafe { NEXT_ACPI_VIRT };
+            unsafe { NEXT_ACPI_VIRT += (num_pages * PAGE_SIZE) as u64 };
+            addr
+        };
+
+        // Lock and get page table and frame allocator.
+        let mut page_table_guard = PAGE_TABLE.lock();
+        let page_table = page_table_guard.as_mut().expect("PAGE_TABLE not initialized");
+        let mut frame_allocator_guard = FRAME_ALLOCATOR.lock();
+        let frame_allocator = frame_allocator_guard.as_mut().expect("FRAME_ALLOCATOR not initialized");
+
+        let flags = PageTableFlags::PRESENT
+            | PageTableFlags::WRITABLE
+            | PageTableFlags::NO_CACHE
+            | PageTableFlags::NO_EXECUTE;
+
+        // Map each page in the region.
+        for i in 0..num_pages {
+            let virt = VirtAddr::new(virt_base + (i as u64) * PAGE_SIZE as u64);
+            let phys = PhysAddr::new((phys_addr & !(PAGE_SIZE as u64 - 1)) + (i as u64) * PAGE_SIZE as u64);
+            let page = Page::<Size4KiB>::containing_address(virt);
+            let frame = PhysFrame::containing_address(phys);
+            // Safety: mapping physical memory, must ensure no overlap.
+            unsafe { page_table
+                .map_to(page, frame, flags, frame_allocator)
+                .expect("failed to map ACPI region")
+                .flush() };
+        }
+
+        let virt_addr = virt_base + offset as u64;
+
         unsafe { PhysicalMapping::new(
             physical_address,
-            NonNull::new((physical_address + self.memory_offset) as *mut T).unwrap(),
+            NonNull::new(virt_addr as *mut T).expect("Null virtual address in ACPI mapping"),
             size,
-            size,
+            num_pages * PAGE_SIZE,
             *self,
         ) }
     }
@@ -152,8 +189,8 @@ impl AcpiHandler for KernelAcpiHandler {
 
 /// Get IO APIC physical addresses using ACPI.
 /// returns a tuple of (address, global_system_interrupt_base)
-fn get_ioapic_info(rsdp_addr: usize, memory_offset: usize) -> Vec<(u32, u32)> {
-    let tables = unsafe { AcpiTables::from_rsdp(KernelAcpiHandler::new(memory_offset), rsdp_addr).unwrap() };
+fn get_ioapic_info(rsdp_addr: usize) -> Vec<(u32, u32)> {
+    let tables = unsafe { AcpiTables::from_rsdp(KernelAcpiHandler, rsdp_addr).unwrap() };
     let platform_info = tables.platform_info().unwrap();
 
     let mut ioapic_addrs = Vec::new();
