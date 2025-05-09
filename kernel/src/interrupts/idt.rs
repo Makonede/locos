@@ -1,3 +1,4 @@
+use crate::info;
 use spin::Lazy;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 
@@ -17,12 +18,14 @@ pub static mut IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
             .set_handler_fn(double_fault_handler)
             .set_stack_index(crate::gdt::DOUBLE_FAULT_IST_INDEX);
     }
+    info!("idt initialized");
     idt
 });
 
 /// Initialize the Interrupt Descriptor Table.
 pub fn init_idt() {
     unsafe { (*IDT).load() };
+    info!("idt loaded");
 }
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {

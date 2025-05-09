@@ -2,6 +2,7 @@ extern crate alloc;
 
 use core::{alloc::GlobalAlloc, ptr::NonNull};
 
+use crate::info;
 use x86_64::{
     VirtAddr,
     structures::paging::{
@@ -49,6 +50,7 @@ pub unsafe fn init_heap() -> Result<(), MapToError<Size4KiB>> {
         }
     }
 
+    info!("heap initialized: {:#?} - {:#?}", heap_start, heap_end);
     Ok(())
 }
 

@@ -16,6 +16,8 @@ use core::{fmt::Write, ptr};
 use flanterm::sys::{flanterm_context, flanterm_fb_init, flanterm_write};
 use spin::Mutex;
 
+use crate::info;
+
 use super::framebuffer::FramebufferInfo;
 
 /// Global terminal instance protected by a mutex.
@@ -36,8 +38,11 @@ pub static FLANTERM: Mutex<Option<FlanConsole>> = Mutex::new(None);
 /// The framebuffer pointer must point to valid memory with the dimensions
 /// specified in framebuffer_info.
 pub fn flanterm_init(framebuffer: *mut u32, framebuffer_info: FramebufferInfo) {
-    let mut lock = FLANTERM.lock();
-    *lock = Some(FlanConsole::new(framebuffer, framebuffer_info));
+    {
+        let mut lock = FLANTERM.lock();
+        *lock = Some(FlanConsole::new(framebuffer, framebuffer_info));
+    }
+    info!("flanterm initialized");
 }
 
 /// A terminal emulator implementation using the flanterm library.

@@ -1,3 +1,4 @@
+use crate::info;
 use limine::memory_map::{Entry, EntryType};
 use spin::Mutex;
 use x86_64::{
@@ -63,6 +64,8 @@ pub unsafe fn init_frame_allocator(memory_map: &'static [&'static Entry]) {
     FRAME_ALLOCATOR
         .lock()
         .replace(unsafe { BootInfoFrameAllocator::init(memory_map) });
+
+    info!("frame allocator initialized");
 }
 
 /// Initializes a new OffsetPageTable with the given memory offset.
@@ -77,6 +80,7 @@ pub unsafe fn init(memory_offset: VirtAddr) {
     PAGE_TABLE
         .lock()
         .replace(unsafe { OffsetPageTable::new(level_4_table, memory_offset) });
+    info!("page tables initialized");
 }
 
 /// Get a reference to the start of the level 4 page table in virtual memory.

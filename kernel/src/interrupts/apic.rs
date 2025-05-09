@@ -1,3 +1,4 @@
+use crate::info;
 use acpi::{AcpiHandler, AcpiTables, InterruptModel, handler::PhysicalMapping};
 use alloc::vec::Vec;
 use core::ptr::NonNull;
@@ -14,7 +15,10 @@ use x86_64::{
     },
 };
 
-use crate::memory::{FRAME_ALLOCATOR, PAGE_TABLE};
+use crate::{
+    debug,
+    memory::{FRAME_ALLOCATOR, PAGE_TABLE},
+};
 
 use super::{idt::IDT, pic::disable_legacy_pics};
 
@@ -88,6 +92,7 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
     }
 
     setup_ioapic_timer(&mut ioapics, &final_lapic);
+    info!("apic initialized with {} IO APICs", ioapic_addrs.len());
 }
 
 #[allow(static_mut_refs)]
@@ -116,6 +121,8 @@ fn setup_ioapic_timer(
         }
         unsafe { ioapic.enable_irq(IOAPIC_TIMER_INPUT) };
     }
+
+    debug!("IOAPIC timer setup");
 }
 
 extern "x86-interrupt" fn lapic_timer_handler(_stack_frame: InterruptStackFrame) {

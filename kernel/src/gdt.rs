@@ -1,3 +1,4 @@
+use crate::info;
 use conquer_once::spin::Lazy;
 use x86_64::{
     VirtAddr,
@@ -45,6 +46,8 @@ pub fn init_gdt() {
         x86_64::instructions::segmentation::CS::set_reg(GDT.1.kernel_code_selector);
         x86_64::instructions::tables::load_tss(GDT.1.tss_selector);
     }
+
+    info!("gdt initialized");
 }
 
 /// Set up the Task State Segment (TSS) with an interrupt stack.
@@ -58,5 +61,6 @@ static TSS: Lazy<TaskStateSegment> = Lazy::new(|| {
 
         stack_start + STACK_SIZE as u64
     };
+    info!("tss initialized");
     tss
 });

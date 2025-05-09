@@ -23,6 +23,7 @@ pub mod interrupts;
 pub mod memory;
 pub mod output;
 pub mod serial;
+pub mod meta;
 
 extern crate alloc;
 
@@ -38,6 +39,7 @@ use limine::{
     },
 };
 use memory::{init_frame_allocator, init_heap, paging};
+use meta::print_welcome;
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::VirtAddr;
 
@@ -45,9 +47,7 @@ use x86_64::VirtAddr;
 unsafe extern "C" fn kernel_main() -> ! {
     assert!(BASE_REVISION.is_supported());
     init_gdt();
-    info!("GDT initialized");
     init_idt();
-    info!("IDT initialized");
 
     let memory_regions = MEMORY_MAP_REQUEST
         .get_response()
@@ -64,7 +64,6 @@ unsafe extern "C" fn kernel_main() -> ! {
     unsafe {
         init_heap().expect("heap initialization failed");
     }
-    info!("Heap initialized");
 
     let framebuffer_response = FRAMEBUFFER_REQUEST
         .get_response()
@@ -90,9 +89,7 @@ unsafe extern "C" fn kernel_main() -> ! {
 
     unsafe { setup_apic(rsdp_addr) };
 
-    for i in 0..100 {
-        println!("Hello, world! {}", i);
-    }
+    print_welcome();
 
     hcf();
 }

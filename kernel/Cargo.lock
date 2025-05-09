@@ -84,7 +84,6 @@ dependencies = [
  "conquer-once",
  "flanterm",
  "limine",
- "log",
  "spin",
  "uart_16550",
  "x2apic",
