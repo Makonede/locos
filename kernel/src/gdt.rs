@@ -9,21 +9,22 @@ use x86_64::{
 };
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
-pub const TIMER_IST_INDEX: u16 = 1;
 
 /// The Global Descriptor Table and its selectors.
 static GDT: Lazy<(GlobalDescriptorTable, Selectors)> = Lazy::new(|| {
     let mut gdt = GlobalDescriptorTable::new();
     let kernel_code_selector = gdt.append(Descriptor::kernel_code_segment());
-    gdt.append(Descriptor::kernel_data_segment());
+    let kernel_data_selector = gdt.append(Descriptor::kernel_data_segment());
     let user_code_selector = gdt.append(Descriptor::user_code_segment());
-    gdt.append(Descriptor::user_data_segment());
+    let user_data_selector = gdt.append(Descriptor::user_data_segment());
     let tss_selector = gdt.append(Descriptor::tss_segment(&TSS));
     (
         gdt,
         Selectors {
             kernel_code_selector,
+            kernel_data_selector,
             user_code_selector,
+            user_data_selector,
             tss_selector,
         },
     )
@@ -33,7 +34,9 @@ static GDT: Lazy<(GlobalDescriptorTable, Selectors)> = Lazy::new(|| {
 #[allow(dead_code)] // remove in future
 struct Selectors {
     kernel_code_selector: SegmentSelector,
+    kernel_data_selector: SegmentSelector,
     user_code_selector: SegmentSelector,
+    user_data_selector: SegmentSelector,
     tss_selector: SegmentSelector,
 }
 
@@ -44,7 +47,13 @@ pub fn init_gdt() {
 
     GDT.0.load();
     unsafe {
-        x86_64::instructions::segmentation::CS::set_reg(GDT.1.kernel_code_selector);
+        use x86_64::instructions::segmentation::{CS, DS, ES, SS};
+        // Set up code and data segments
+        CS::set_reg(GDT.1.kernel_code_selector);
+        DS::set_reg(GDT.1.kernel_data_selector);
+        ES::set_reg(GDT.1.kernel_data_selector);
+        SS::set_reg(GDT.1.kernel_data_selector);
+        // Load TSS
         x86_64::instructions::tables::load_tss(GDT.1.tss_selector);
     }
 
@@ -58,13 +67,6 @@ static TSS: Lazy<TaskStateSegment> = Lazy::new(|| {
         const STACK_SIZE: usize = 4096 * 5;
         static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
         let stack_start = VirtAddr::from_ptr(&raw const STACK);
-        stack_start + STACK_SIZE as u64
-    };
-
-    tss.interrupt_stack_table[TIMER_IST_INDEX as usize] = {
-        const STACK_SIZE: usize = 4096 * 5;
-        static mut TIMER_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
-        let stack_start = VirtAddr::from_ptr(&raw const TIMER_STACK);
         stack_start + STACK_SIZE as u64
     };
 

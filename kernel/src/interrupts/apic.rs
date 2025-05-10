@@ -1,4 +1,4 @@
-use crate::{info, trace};
+use crate::{error, info, print, println, trace, warn};
 use acpi::{handler::PhysicalMapping, madt::{InterruptSourceOverrideEntry, Madt, MadtEntry}, platform::interrupt, AcpiHandler, AcpiTables, InterruptModel};
 use alloc::vec::Vec;
 use core::ptr::NonNull;
@@ -33,10 +33,42 @@ const IOAPIC_TIMER_VECTOR: u8 = 0x20;
 const IOAPIC_TIMER_INPUT: u8 = 0;
 const TIMER_RELOAD: u16 = (1193182u32 / 20) as u16;
 
+/// Interrupt handler for the PIT.
+///
+/// Acknowledges the interrupt by writing to the EOI MSR.
+extern "x86-interrupt" fn ioapic_timer_handler(_stack_frame: InterruptStackFrame) {
+    unsafe { 
+        Msr::new(X2APIC_EOI_MSR).write(0);
+    };
+}
+
+extern "x86-interrupt" fn lapic_timer_handler(_stack_frame: InterruptStackFrame) {
+    unsafe { 
+        Msr::new(X2APIC_EOI_MSR).write(0);
+    };
+}
+
+extern "x86-interrupt" fn spurious_handler(_stack_frame: InterruptStackFrame) {
+    warn!("spurious interrupt received");
+
+    unsafe { 
+        Msr::new(X2APIC_EOI_MSR).write(0);
+    };
+}
+
+extern "x86-interrupt" fn lapic_error_handler(_stack_frame: InterruptStackFrame) {
+    warn!("error interrupt received");
+    
+    unsafe { 
+        Msr::new(X2APIC_EOI_MSR).write(0);
+    };
+}
+
 /// Sets up the Local APIC and enables it using the x2apic crate.
 ///
 /// # Safety
 /// Must be called after IDT is loaded
+#[allow(static_mut_refs)]
 pub unsafe fn setup_apic(rsdp_addr: usize) {
     disable_legacy_pics();
 
@@ -54,6 +86,7 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
                 VirtAddr::new(XAPIC_VIRTUAL_START),
             );
             lapic = lapic.set_xapic_base(XAPIC_VIRTUAL_START);
+            error!("no x2apic support detected, using xAPIC. this will cause issues with the global timer");
         }
         ApicSupport::None => {
             panic!("No APIC support detected");
@@ -62,6 +95,15 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
     }
 
     let mut final_lapic = lapic.build().unwrap();
+
+    unsafe {
+        (*IDT.as_mut_ptr())[LAPIC_TIMER_VECTOR]
+            .set_handler_fn(lapic_timer_handler);
+        (*IDT.as_mut_ptr())[LAPIC_ERROR_VECTOR]
+            .set_handler_fn(lapic_error_handler);
+        (*IDT.as_mut_ptr())[LAPIC_SPURIOUS_VECTOR]
+            .set_handler_fn(spurious_handler);
+    }
 
     unsafe { final_lapic.enable() };
 
@@ -135,7 +177,6 @@ fn setup_ioapic_timer(
     unsafe { 
         (*IDT.as_mut_ptr())[IOAPIC_TIMER_VECTOR]
             .set_handler_fn(ioapic_timer_handler)
-            .set_stack_index(crate::gdt::TIMER_IST_INDEX); 
     };
 
     for (ioapic, gsi_base) in ioapics.iter_mut() {
@@ -146,15 +187,6 @@ fn setup_ioapic_timer(
     }
 
     debug!("IOAPIC timer setup");
-}
-
-/// Interrupt handler for the PIT.
-///
-/// Acknowledges the interrupt by writing to the EOI MSR.
-extern "x86-interrupt" fn ioapic_timer_handler(_stack_frame: InterruptStackFrame) {
-    unsafe { 
-        Msr::new(X2APIC_EOI_MSR).write(0);
-    };
 }
 
 /// Set up the PIT (Programmable Interval Timer) channel 0 in mode 2 (rate generator).
