@@ -173,7 +173,6 @@ struct Node {
 // Safety: Node contains only a NonNull pointer which is used exclusively
 // through synchronized mutex access in BuddyAlloc's implementation
 unsafe impl Send for Node {}
-unsafe impl Sync for Node {}
 
 /// A buddy allocator for managing heap memory allocations
 ///

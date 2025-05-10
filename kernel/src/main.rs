@@ -53,12 +53,14 @@ unsafe extern "C" fn kernel_main() -> ! {
         .get_response()
         .expect("memory map request failed")
         .entries();
-    unsafe { init_frame_allocator(memory_regions) };
-
-    let physical_memory_offset = HHDM_REQUEST
+     
+     let physical_memory_offset = HHDM_REQUEST
         .get_response()
         .expect("Hhdm request failed")
         .offset();
+
+    unsafe { init_frame_allocator(memory_regions, physical_memory_offset) };
+
     unsafe { paging::init(VirtAddr::new(physical_memory_offset)) };
 
     unsafe {
