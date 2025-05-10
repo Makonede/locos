@@ -21,9 +21,9 @@ You should have received a copy of the GNU General Public License along with loc
 pub mod gdt;
 pub mod interrupts;
 pub mod memory;
+pub mod meta;
 pub mod output;
 pub mod serial;
-pub mod meta;
 
 extern crate alloc;
 

@@ -1,5 +1,9 @@
-use crate::{error, info, print, println, trace, warn};
-use acpi::{handler::PhysicalMapping, madt::{InterruptSourceOverrideEntry, Madt, MadtEntry}, platform::interrupt, AcpiHandler, AcpiTables, InterruptModel};
+use crate::{error, info, warn};
+use acpi::{
+    AcpiHandler, AcpiTables, InterruptModel,
+    handler::PhysicalMapping,
+    madt::{InterruptSourceOverrideEntry, Madt, MadtEntry},
+};
 use alloc::vec::Vec;
 use core::ptr::NonNull;
 use x2apic::{
@@ -7,10 +11,13 @@ use x2apic::{
     lapic::{LocalApicBuilder, xapic_base},
 };
 use x86_64::{
-    instructions::{interrupts, port::Port}, registers::model_specific::Msr, structures::{
+    PhysAddr, VirtAddr,
+    instructions::port::Port,
+    registers::model_specific::Msr,
+    structures::{
         idt::InterruptStackFrame,
         paging::{Mapper, Page, PageTableFlags, PhysFrame, Size4KiB},
-    }, PhysAddr, VirtAddr
+    },
 };
 
 use crate::{
@@ -37,13 +44,13 @@ const TIMER_RELOAD: u16 = (1193182u32 / 20) as u16;
 ///
 /// Acknowledges the interrupt by writing to the EOI MSR.
 extern "x86-interrupt" fn ioapic_timer_handler(_stack_frame: InterruptStackFrame) {
-    unsafe { 
+    unsafe {
         Msr::new(X2APIC_EOI_MSR).write(0);
     };
 }
 
 extern "x86-interrupt" fn lapic_timer_handler(_stack_frame: InterruptStackFrame) {
-    unsafe { 
+    unsafe {
         Msr::new(X2APIC_EOI_MSR).write(0);
     };
 }
@@ -51,15 +58,15 @@ extern "x86-interrupt" fn lapic_timer_handler(_stack_frame: InterruptStackFrame)
 extern "x86-interrupt" fn spurious_handler(_stack_frame: InterruptStackFrame) {
     warn!("spurious interrupt received");
 
-    unsafe { 
+    unsafe {
         Msr::new(X2APIC_EOI_MSR).write(0);
     };
 }
 
 extern "x86-interrupt" fn lapic_error_handler(_stack_frame: InterruptStackFrame) {
     warn!("error interrupt received");
-    
-    unsafe { 
+
+    unsafe {
         Msr::new(X2APIC_EOI_MSR).write(0);
     };
 }
@@ -86,7 +93,9 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
                 VirtAddr::new(XAPIC_VIRTUAL_START),
             );
             lapic = lapic.set_xapic_base(XAPIC_VIRTUAL_START);
-            error!("no x2apic support detected, using xAPIC. this will cause issues with the global timer");
+            error!(
+                "no x2apic support detected, using xAPIC. this will cause issues with the global timer"
+            );
         }
         ApicSupport::None => {
             panic!("No APIC support detected");
@@ -97,12 +106,9 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
     let mut final_lapic = lapic.build().unwrap();
 
     unsafe {
-        (*IDT.as_mut_ptr())[LAPIC_TIMER_VECTOR]
-            .set_handler_fn(lapic_timer_handler);
-        (*IDT.as_mut_ptr())[LAPIC_ERROR_VECTOR]
-            .set_handler_fn(lapic_error_handler);
-        (*IDT.as_mut_ptr())[LAPIC_SPURIOUS_VECTOR]
-            .set_handler_fn(spurious_handler);
+        (*IDT.as_mut_ptr())[LAPIC_TIMER_VECTOR].set_handler_fn(lapic_timer_handler);
+        (*IDT.as_mut_ptr())[LAPIC_ERROR_VECTOR].set_handler_fn(lapic_error_handler);
+        (*IDT.as_mut_ptr())[LAPIC_SPURIOUS_VECTOR].set_handler_fn(spurious_handler);
     }
 
     unsafe { final_lapic.enable() };
@@ -139,12 +145,14 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
         .find(|x| x.irq == IOAPIC_TIMER_INPUT);
 
     let timer_gsi = if let Some(timer_override) = timer_override {
-        timer_override.global_system_interrupt 
+        timer_override.global_system_interrupt
     } else {
         IOAPIC_TIMER_INPUT as u32
     };
 
-    unsafe { setup_pit_timer(TIMER_RELOAD); }
+    unsafe {
+        setup_pit_timer(TIMER_RELOAD);
+    }
     setup_ioapic_timer(&mut ioapics, timer_gsi, unsafe { final_lapic.id() } as u8);
 
     info!("apic initialized with {} IO APICs", ioapic_addrs.len());
@@ -156,13 +164,11 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
 /// This function masks the IOAPIC timer, assigns the interrupt vector,
 /// and enables the IRQ for the timer input. It also installs the LAPIC timer handler
 /// in the IDT and enabled the PIT.
-fn setup_ioapic_timer(
-    ioapics: &mut [(x2apic::ioapic::IoApic, u32)],
-    timer_gsi: u32,
-    lapic_id: u8,
-) {
+fn setup_ioapic_timer(ioapics: &mut [(x2apic::ioapic::IoApic, u32)], timer_gsi: u32, lapic_id: u8) {
     for (ioapic, gsi_base) in ioapics.iter_mut() {
-        if !(*gsi_base..*gsi_base + unsafe { ioapic.max_table_entry() } as u32 + 1).contains(&timer_gsi) {
+        if !(*gsi_base..*gsi_base + unsafe { ioapic.max_table_entry() } as u32 + 1)
+            .contains(&timer_gsi)
+        {
             continue;
         }
         let mut entry = RedirectionTableEntry::default();
@@ -174,13 +180,12 @@ fn setup_ioapic_timer(
         unsafe { ioapic.set_table_entry((timer_gsi - *gsi_base) as u8, entry) };
     }
 
-    unsafe { 
-        (*IDT.as_mut_ptr())[IOAPIC_TIMER_VECTOR]
-            .set_handler_fn(ioapic_timer_handler)
-    };
+    unsafe { (*IDT.as_mut_ptr())[IOAPIC_TIMER_VECTOR].set_handler_fn(ioapic_timer_handler) };
 
     for (ioapic, gsi_base) in ioapics.iter_mut() {
-        if !(*gsi_base..*gsi_base + unsafe { ioapic.max_table_entry() } as u32 + 1).contains(&timer_gsi) {
+        if !(*gsi_base..*gsi_base + unsafe { ioapic.max_table_entry() } as u32 + 1)
+            .contains(&timer_gsi)
+        {
             continue;
         }
         unsafe { ioapic.enable_irq((timer_gsi - *gsi_base) as u8) };
@@ -201,7 +206,9 @@ unsafe fn setup_pit_timer(reload: u16) {
     }
 }
 
-fn get_interrupt_source_overrides(tables: &mut AcpiTables<KernelAcpiHandler>) -> Vec<InterruptSourceOverrideEntry> {
+fn get_interrupt_source_overrides(
+    tables: &mut AcpiTables<KernelAcpiHandler>,
+) -> Vec<InterruptSourceOverrideEntry> {
     let pin = tables.find_table::<Madt>().unwrap();
     let madt = pin.get();
     madt.entries()
