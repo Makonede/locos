@@ -1,7 +1,10 @@
-use core::arch::naked_asm;
+use core::{arch::naked_asm, ptr::NonNull};
 
 use alloc::collections::vec_deque::VecDeque;
 use spin::Mutex;
+use x86_64::{registers::{rflags, segmentation::{Segment, CS, SS}}, structures::paging::Mapper};
+
+use crate::{gdt::KERNEL_CODE_SEGMENT_INDEX, memory::PAGE_TABLE};
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 
@@ -23,7 +26,19 @@ impl TaskScheduler {
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 struct ProcessControlBlock {
-    pub state: TaskRegisters,
+    pub regs: TaskRegisters,
+    pub state: TaskState,
+}
+
+/// State of a task
+/// - Ready: Task is ready to run
+/// - Running: Task is currently running
+/// - Terminated: Task has finished running
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TaskState {
+    Ready,
+    Running,
+    Terminated,
 }
 
 // Stores task registers in reverse order of stack push during context switch
@@ -50,20 +65,14 @@ struct TaskRegisters {
     interrupt_rip: u64,
     interrupt_cs: u64,
     interrupt_rflags: u64,
-    // these might not be present!
     interrupt_rsp: u64,
     interrupt_ss: u64,
-}
-
-/// add main to the process list
-pub fn initialize_multitasking() {
-    todo!()
 }
 
 /// switch to a task
 #[naked]
 #[unsafe(no_mangle)]
-unsafe extern "C" fn schedule() {
+unsafe extern "x86-interrupt" fn schedule() {
     unsafe {
         naked_asm!(
             "push rax",
@@ -113,14 +122,17 @@ unsafe extern "C" fn schedule() {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
     let mut scheduler = TASK_SCHEDULER.lock();
+
+    if scheduler.task_list.front().unwrap().state == TaskState::Terminated {
+        scheduler.task_list.pop_front();
+    }
     
-    let mut head = scheduler.task_list.pop_front()
-        .expect("no processes in queue. perhaps you forgot to add main?");
-
-    head.state = unsafe { *current_task_context };
-
+    // save current task context
+    let mut head = scheduler.task_list.pop_front().unwrap();
+    head.regs = unsafe { *current_task_context };
     scheduler.task_list.push_back(head);
 
-    let next_task = scheduler.task_list.pop_front().unwrap();
-    unsafe { *current_task_context = next_task.state };
+    // run front task
+    let next_task = scheduler.task_list.front().unwrap();
+    unsafe { *current_task_context = next_task.regs };
 }

@@ -10,6 +10,12 @@ use x86_64::{
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
+pub const KERNEL_CODE_SEGMENT_INDEX: u16 = 1;
+pub const KERNEL_DATA_SEGMENT_INDEX: u16 = 2;
+pub const USER_CODE_SEGMENT_INDEX: u16 = 3;
+pub const USER_DATA_SEGMENT_INDEX: u16 = 4;
+pub const TSS_SEGMENT_INDEX: u16 = 5;
+
 /// The Global Descriptor Table and its selectors.
 static GDT: Lazy<(GlobalDescriptorTable, Selectors)> = Lazy::new(|| {
     let mut gdt = GlobalDescriptorTable::new();
