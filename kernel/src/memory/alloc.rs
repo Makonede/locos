@@ -3,14 +3,21 @@ extern crate alloc;
 use core::{alloc::GlobalAlloc, ptr::NonNull};
 
 use crate::info;
+use spin::Mutex;
 use x86_64::{
     VirtAddr,
     structures::paging::{
-        FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB, mapper::MapToError,
+        FrameAllocator, FrameDeallocator, Mapper, Page, PageTableFlags, Size4KiB,
+        mapper::{MapToError, UnmapError},
     },
 };
 
 use super::{FRAME_ALLOCATOR, PAGE_TABLE};
+
+pub static PAGE_ALLOCATOR: Mutex<PageAllocator> = Mutex::new(PageAllocator::new(
+    VirtAddr::new(HEAP_START as u64),
+    VirtAddr::new(HEAP_START as u64 + HEAP_SIZE as u64),
+));
 
 #[global_allocator]
 pub static ALLOCATOR: Locked<BuddyAlloc<20, 16>> = Locked::new(BuddyAlloc::new(
@@ -351,5 +358,121 @@ unsafe impl<const L: usize, const S: usize> GlobalAlloc for Locked<BuddyAlloc<L,
         };
 
         inner.merge_buddies(level, NonNull::new(ptr as *mut ()).unwrap());
+    }
+}
+
+/// Represents the layout of a page allocation
+#[derive(Clone, Copy, Debug)]
+pub struct PageAllocLayout {
+    /// the page that represents the start of the allocation
+    pub page: Page,
+    /// the length of the allocation in pages
+    pub length: usize,
+}
+
+impl PageAllocLayout {
+    /// Creates a new page allocation layout
+    pub const fn new(page: Page, length: usize) -> Self {
+        PageAllocLayout { page, length }
+    }
+}
+
+/// A wrapper around a buddy allocator to allocate pages.
+///
+/// 20 levels of buddy allocator with 4 KiB pages, meaning 2GiB of virtual memory
+pub struct PageAllocator<const L: usize = 20> {
+    allocator: BuddyAlloc<L, 4096>,
+}
+
+impl<const L: usize> PageAllocator<L> {
+    /// Creates a new page allocator
+    /// Start and end must be page aligned and match the size of the buddy allocator
+    /// panics if the start and end are not page aligned
+    pub const fn new(virt_start: VirtAddr, virt_end: VirtAddr) -> Self {
+        if virt_start.as_u64() % 4096 != 0 {
+            panic!("virt_start must be page aligned");
+        } else if virt_end.as_u64() % 4096 != 0 {
+            panic!("virt_end must be page aligned");
+        }
+
+        PageAllocator {
+            allocator: BuddyAlloc::new(virt_start, virt_end),
+        }
+    }
+
+    /// Maps a specified amount of contiguous pages using the global Physical Frame Allocator and Mapper
+    pub fn allocate_pages(
+        &mut self,
+        num_pages: usize,
+    ) -> Result<PageAllocLayout, MapToError<Size4KiB>> {
+        let size = (num_pages * 4096).next_power_of_two();
+
+        let level = self
+            .allocator
+            .get_level_from_size(size)
+            .expect("Invalid size for page allocation");
+
+        let block = self
+            .allocator
+            .get_free_block(level)
+            .expect("OOM while allocating pages");
+
+        let mut frame_alloc_lock = FRAME_ALLOCATOR.lock();
+        let frame_alloc = frame_alloc_lock.as_mut().unwrap();
+        let mut page_table_lock = PAGE_TABLE.lock();
+        let page_table = page_table_lock.as_mut().unwrap();
+        for page in ((block.as_ptr() as usize)..(block.as_ptr() as usize + size)).step_by(4096) {
+            let physframe = frame_alloc
+                .allocate_frame()
+                .ok_or(MapToError::FrameAllocationFailed)?;
+
+            unsafe {
+                page_table
+                    .map_to(
+                        Page::containing_address(VirtAddr::new(page as u64)),
+                        physframe,
+                        PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
+                        frame_alloc,
+                    )?
+                    .flush()
+            };
+        }
+
+        Ok(PageAllocLayout::new(
+            Page::containing_address(VirtAddr::new(block.as_ptr() as u64)),
+            num_pages,
+        ))
+    }
+
+    /// Deallocates an allocated amount of pages
+    pub fn deallocate_pages(&mut self, info: PageAllocLayout) -> Result<(), UnmapError> {
+        let size = (info.length * 4096).next_power_of_two();
+        let level = self
+            .allocator
+            .get_level_from_size(size)
+            .expect("Invalid size for page allocation");
+
+        let mut frame_alloc_lock = FRAME_ALLOCATOR.lock();
+        let frame_alloc = frame_alloc_lock.as_mut().unwrap();
+        let mut page_table_lock = PAGE_TABLE.lock();
+        let page_table = page_table_lock.as_mut().unwrap();
+
+        for page in ((info.page.start_address().as_u64() as usize)
+            ..(info.page.start_address().as_u64() as usize + size))
+            .step_by(4096)
+        {
+            let (frame, flusher) = page_table.unmap(Page::<Size4KiB>::containing_address(
+                VirtAddr::new(page as u64),
+            ))?;
+            unsafe { frame_alloc.deallocate_frame(frame) };
+            flusher.flush();
+        }
+
+        self.allocator.merge_buddies(
+            level,
+            NonNull::new(info.page.start_address().as_u64() as *mut ()).unwrap(),
+        );
+
+        Ok(())
     }
 }
