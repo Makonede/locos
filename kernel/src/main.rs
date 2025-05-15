@@ -18,7 +18,6 @@ You should have received a copy of the GNU General Public License along with loc
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
-#![feature(naked_functions)]
 pub mod gdt;
 pub mod interrupts;
 pub mod memory;

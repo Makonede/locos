@@ -104,7 +104,7 @@ struct TaskRegisters {
 }
 
 /// switch to a task
-#[naked]
+#[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "x86-interrupt" fn schedule() {
     unsafe {
