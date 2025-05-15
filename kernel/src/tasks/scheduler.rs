@@ -2,11 +2,45 @@ use core::{arch::naked_asm, ptr::NonNull};
 
 use alloc::collections::vec_deque::VecDeque;
 use spin::Mutex;
-use x86_64::{registers::{rflags, segmentation::{Segment, CS, SS}}, structures::paging::Mapper};
+use x86_64::registers::{rflags::{self, RFlags}, segmentation::{Segment, CS, SS}};
 
-use crate::{gdt::KERNEL_CODE_SEGMENT_INDEX, memory::PAGE_TABLE};
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
+
+/// adds a new task to the scheduler
+/// 
+/// task should be a pointer to the function to run
+/// stack_size is the size of the stack for the task in pages
+pub fn create_task(task: NonNull<()>, stack_size: usize) {
+    let mut scheduler = TASK_SCHEDULER.lock();
+    let task = ProcessControlBlock {
+        regs: TaskRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+
+            interrupt_rip: task.as_ptr() as u64,
+            interrupt_cs: CS::get_reg().0 as u64,
+            interrupt_rflags: rflags::read_raw(),
+            interrupt_rsp: todo!(),
+            interrupt_ss: SS::get_reg().0 as u64,
+        },
+        state: TaskState::Ready,
+    };
+    scheduler.task_list.push_back(task);
+}
 
 struct TaskScheduler {
     task_list: VecDeque<ProcessControlBlock>,
