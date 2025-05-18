@@ -2,13 +2,15 @@ use core::{arch::naked_asm, ptr::NonNull};
 
 use alloc::collections::vec_deque::VecDeque;
 use spin::Mutex;
-use x86_64::registers::{rflags::{self, RFlags}, segmentation::{Segment, CS, SS}};
-
+use x86_64::registers::{
+    rflags::{self, RFlags},
+    segmentation::{CS, SS, Segment},
+};
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 
 /// adds a new task to the scheduler
-/// 
+///
 /// task should be a pointer to the function to run
 /// stack_size is the size of the stack for the task in pages
 pub fn create_task(task: NonNull<()>, stack_size: usize) {
@@ -123,7 +125,7 @@ unsafe extern "x86-interrupt" fn schedule() {
         "push r13",
         "push r14",
         "push r15",
-        "mov rdi, rsp", // put current task's stack pointer
+        "mov rdi, rsp",        // put current task's stack pointer
         "call schedule_inner", // call scheduler with rsp
         // send EOI to lapic using MSR 0x80B
         "xor eax, eax",
@@ -158,7 +160,7 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
     if scheduler.task_list.front().unwrap().state == TaskState::Terminated {
         scheduler.task_list.pop_front();
     }
-    
+
     // save current task context
     let mut head = scheduler.task_list.pop_front().unwrap();
     head.regs = unsafe { *current_task_context };

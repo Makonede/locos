@@ -4,7 +4,10 @@ use crate::{debug, info};
 use limine::memory_map::{Entry, EntryType};
 use spin::Mutex;
 use x86_64::{
-    structures::paging::{FrameAllocator, FrameDeallocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB}, PhysAddr, VirtAddr
+    PhysAddr, VirtAddr,
+    structures::paging::{
+        FrameAllocator, FrameDeallocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB,
+    },
 };
 
 pub static FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
@@ -89,7 +92,10 @@ impl BootInfoFrameAllocator {
             returned.memory_map.push(frame);
         }
 
-        debug!("frame allocator initialized with {} frames", returned.memory_map.len());
+        debug!(
+            "frame allocator initialized with {} frames",
+            returned.memory_map.len()
+        );
 
         returned
     }
@@ -111,8 +117,7 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
 impl FrameDeallocator<Size4KiB> for BootInfoFrameAllocator {
     unsafe fn deallocate_frame(&mut self, frame: PhysFrame) {
         let ptr = frame.start_address().as_u64() + self.offset;
-        let ptr = NonNull::new(ptr as *mut ())
-            .expect("failed to convert to NonNull");
+        let ptr = NonNull::new(ptr as *mut ()).expect("failed to convert to NonNull");
         self.memory_map.push(ptr);
     }
 }

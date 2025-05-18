@@ -37,7 +37,7 @@ pub fn init_page_allocator(available_ram_bytes: u64) {
         pagealloc_size <<= 1;
     }
     let pagealloc_end = PAGEALLOC_START + pagealloc_size;
-    
+
     let page_count = pagealloc_size / 4096;
     let levels = page_count.next_power_of_two().trailing_zeros() as usize + 1;
     alloc_lock.replace(PageAllocator::new(
@@ -46,10 +46,12 @@ pub fn init_page_allocator(available_ram_bytes: u64) {
         levels,
     ));
 
-    info!("Page allocator initialized: {:#?} - {:#?}, size managed: {} GiB", 
-          VirtAddr::new(PAGEALLOC_START), 
-          VirtAddr::new(pagealloc_end), 
-          pagealloc_size / (1024 * 1024 * 1024));
+    info!(
+        "Page allocator initialized: {:#?} - {:#?}, size managed: {} GiB",
+        VirtAddr::new(PAGEALLOC_START),
+        VirtAddr::new(pagealloc_end),
+        pagealloc_size / (1024 * 1024 * 1024)
+    );
 }
 
 #[global_allocator]
@@ -412,7 +414,7 @@ impl PageAllocLayout {
 
 /// A buddy allocator for virtual memory pages, supporting allocation and deallocation
 /// of contiguous page blocks using a dynamic number of levels and heap-allocated free lists.
-/// 
+///
 /// The allocator manages a region of virtual memory, splitting and merging blocks
 /// to minimize fragmentation. All metadata is stored in heap-allocated structures.
 pub struct PageAllocator {
