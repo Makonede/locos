@@ -30,7 +30,6 @@ extern crate alloc;
 
 use core::{arch::asm, panic::PanicInfo};
 
-use alloc::vec::Vec;
 use gdt::init_gdt;
 use interrupts::{init_idt, setup_apic};
 use limine::{
@@ -41,7 +40,7 @@ use limine::{
         RsdpRequest,
     },
 };
-use memory::{alloc::PAGE_ALLOCATOR, init_frame_allocator, init_heap, init_page_allocator, paging};
+use memory::{init_frame_allocator, init_heap, init_page_allocator, paging};
 use meta::print_welcome;
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};

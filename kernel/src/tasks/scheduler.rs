@@ -3,7 +3,7 @@ use core::{arch::naked_asm, ptr::NonNull};
 use alloc::collections::vec_deque::VecDeque;
 use spin::Mutex;
 use x86_64::registers::{
-    rflags::{self, RFlags},
+    rflags::{self},
     segmentation::{CS, SS, Segment},
 };
 
@@ -14,7 +14,7 @@ static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 /// task should be a pointer to the function to run
 /// stack_size is the size of the stack for the task in pages
 pub fn create_task(task: NonNull<()>, stack_size: usize) {
-    let mut scheduler = TASK_SCHEDULER.lock();
+    let scheduler = TASK_SCHEDULER.lock();
     let task = ProcessControlBlock {
         regs: TaskRegisters {
             rax: 0,
