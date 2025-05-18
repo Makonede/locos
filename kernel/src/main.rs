@@ -30,19 +30,19 @@ extern crate alloc;
 
 use core::{arch::asm, panic::PanicInfo};
 
+use alloc::vec::Vec;
 use gdt::init_gdt;
 use interrupts::{init_idt, setup_apic};
 use limine::{
-    BaseRevision,
-    request::{
+    memory_map::EntryType, request::{
         FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
         RsdpRequest,
-    },
+    }, BaseRevision
 };
-use memory::{init_frame_allocator, init_heap, paging};
+use memory::{alloc::PAGE_ALLOCATOR, init_frame_allocator, init_heap, init_page_allocator, paging};
 use meta::print_welcome;
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
-use x86_64::VirtAddr;
+use x86_64::{registers::debug, VirtAddr};
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kernel_main() -> ! {
@@ -67,6 +67,18 @@ unsafe extern "C" fn kernel_main() -> ! {
     unsafe {
         init_heap().expect("heap initialization failed");
     }
+
+    // sum all usable memory regions
+    let usable_regions_sum = memory_regions
+        .iter()
+        .filter(|entry| entry.entry_type == EntryType::USABLE)
+        .map(|entry| entry.length)
+        .sum::<u64>();
+
+    debug!("Total usable memory: {} bytes ({:.2} GiB)", 
+           usable_regions_sum, 
+           usable_regions_sum as f64 / (1024.0 * 1024.0 * 1024.0));
+    init_page_allocator(usable_regions_sum);
 
     let framebuffer_response = FRAMEBUFFER_REQUEST
         .get_response()

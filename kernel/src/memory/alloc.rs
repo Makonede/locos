@@ -1,5 +1,7 @@
 extern crate alloc;
 
+use alloc::collections::VecDeque;
+use alloc::vec::Vec;
 use core::{alloc::GlobalAlloc, ptr::NonNull};
 
 use crate::info;
@@ -14,19 +16,50 @@ use x86_64::{
 
 use super::{FRAME_ALLOCATOR, PAGE_TABLE};
 
-pub static PAGE_ALLOCATOR: Mutex<PageAllocator> = Mutex::new(PageAllocator::new(
-    VirtAddr::new(HEAP_START as u64),
-    VirtAddr::new(HEAP_START as u64 + HEAP_SIZE as u64),
-));
+pub static PAGE_ALLOCATOR: Mutex<Option<PageAllocator>> = Mutex::new(None);
+
+/// The start address for the PageAllocator region (must not overlap with heap).
+pub const PAGEALLOC_START: u64 = 0xFFFF_9000_0000_0000;
+
+/// Initializes the global page allocator with a region sized for the available RAM.
+/// Should be called once during kernel setup.
+///
+/// # Arguments
+/// * `available_ram_bytes` - The amount of RAM to manage with the page allocator.
+pub fn init_page_allocator(available_ram_bytes: u64) {
+    let mut alloc_lock = PAGE_ALLOCATOR.lock();
+    if alloc_lock.is_some() {
+        panic!("Page allocator already initialized");
+    }
+    // Round up to next power of two for region size
+    let mut pagealloc_size = 4096u64;
+    while pagealloc_size < available_ram_bytes {
+        pagealloc_size <<= 1;
+    }
+    let pagealloc_end = PAGEALLOC_START + pagealloc_size;
+    
+    let page_count = pagealloc_size / 4096;
+    let levels = page_count.next_power_of_two().trailing_zeros() as usize + 1;
+    alloc_lock.replace(PageAllocator::new(
+        VirtAddr::new(PAGEALLOC_START),
+        VirtAddr::new(pagealloc_end),
+        levels,
+    ));
+
+    info!("Page allocator initialized: {:#?} - {:#?}, size managed: {} GiB", 
+          VirtAddr::new(PAGEALLOC_START), 
+          VirtAddr::new(pagealloc_end), 
+          pagealloc_size / (1024 * 1024 * 1024));
+}
 
 #[global_allocator]
-pub static ALLOCATOR: Locked<BuddyAlloc<20, 16>> = Locked::new(BuddyAlloc::new(
+pub static ALLOCATOR: Locked<BuddyAlloc<21, 16>> = Locked::new(BuddyAlloc::new(
     VirtAddr::new(HEAP_START as u64),
     VirtAddr::new(HEAP_START as u64 + HEAP_SIZE as u64),
 ));
 
 pub const HEAP_START: usize = 0xFFFF_8800_0000_0000;
-pub const HEAP_SIZE: usize = 8 * 1024 * 1024; // 8 MiB
+pub const HEAP_SIZE: usize = 16 * 1024 * 1024; // 16 MiB
 
 /// Initialize a heap region in virtual memory and map it to physical frames
 ///
@@ -377,43 +410,179 @@ impl PageAllocLayout {
     }
 }
 
-/// A wrapper around a buddy allocator to allocate pages.
-///
-/// 20 levels of buddy allocator with 4 KiB pages, meaning 2GiB of virtual memory
-pub struct PageAllocator<const L: usize = 20> {
-    allocator: BuddyAlloc<L, 4096>,
+/// A buddy allocator for virtual memory pages, supporting allocation and deallocation
+/// of contiguous page blocks using a dynamic number of levels and heap-allocated free lists.
+/// 
+/// The allocator manages a region of virtual memory, splitting and merging blocks
+/// to minimize fragmentation. All metadata is stored in heap-allocated structures.
+pub struct PageAllocator {
+    heap_start: VirtAddr,
+    heap_end: VirtAddr,
+    levels: usize,
+    free_lists: Vec<VecDeque<NonNull<()>>>,
 }
 
-impl<const L: usize> PageAllocator<L> {
-    /// Creates a new page allocator
-    /// Start and end must be page aligned and match the size of the buddy allocator
-    /// panics if the start and end are not page aligned
-    pub const fn new(virt_start: VirtAddr, virt_end: VirtAddr) -> Self {
-        if virt_start.as_u64() % 4096 != 0 {
-            panic!("virt_start must be page aligned");
-        } else if virt_end.as_u64() % 4096 != 0 {
-            panic!("virt_end must be page aligned");
+unsafe impl Send for PageAllocator {}
+
+impl PageAllocator {
+    /// Creates a new PageAllocator for the given virtual address range.
+    ///
+    /// # Arguments
+    /// * `virt_start` - The start of the virtual memory region (must be page aligned)
+    /// * `virt_end` - The end of the virtual memory region (must be page aligned)
+    ///
+    /// The allocator will support block sizes up to the region size, with the number
+    /// of levels determined at runtime.
+    /// Creates a new PageAllocator for the given virtual address range and number of levels.
+    ///
+    /// # Arguments
+    /// * `virt_start` - The start of the virtual memory region (must be page aligned)
+    /// * `virt_end` - The end of the virtual memory region (must be page aligned)
+    /// * `levels` - The number of buddy levels (must match region size)
+    ///
+    /// Panics if the region size does not match the number of levels.
+    pub fn new(virt_start: VirtAddr, virt_end: VirtAddr, levels: usize) -> Self {
+        assert!(
+            virt_start.as_u64() % 4096 == 0,
+            "virt_start must be page aligned"
+        );
+        assert!(
+            virt_end.as_u64() % 4096 == 0,
+            "virt_end must be page aligned"
+        );
+        let region_size = virt_end.as_u64() - virt_start.as_u64();
+        let expected_size = (1u64 << (levels - 1)) * 4096;
+        assert!(
+            region_size == expected_size,
+            "region size ({region_size}) does not match levels ({levels}): expected {expected_size}"
+        );
+
+        let mut free_lists = Vec::with_capacity(levels);
+        for _ in 0..levels {
+            free_lists.push(VecDeque::new());
         }
 
-        PageAllocator {
-            allocator: BuddyAlloc::new(virt_start, virt_end),
+        // Insert the whole region as a single free block at the largest level
+        free_lists[0].push_back(NonNull::new(virt_start.as_u64() as *mut ()).unwrap());
+
+        Self {
+            heap_start: virt_start,
+            heap_end: virt_end,
+            levels,
+            free_lists,
         }
     }
 
-    /// Maps a specified amount of contiguous pages using the global Physical Frame Allocator and Mapper
+    /// Returns the total size managed by the allocator in bytes.
+    fn max_size(&self) -> usize {
+        (self.heap_end.as_u64() - self.heap_start.as_u64()) as usize
+    }
+
+    /// Returns the block size in bytes for a given level.
+    ///
+    /// # Arguments
+    /// * `level` - The buddy level (0 = largest block)
+    fn block_size(&self, level: usize) -> usize {
+        self.max_size() >> level
+    }
+
+    /// Determines the smallest buddy level that can fit the requested size.
+    ///
+    /// # Arguments
+    /// * `size` - The requested allocation size in bytes
+    ///
+    /// Returns Some(level) if a suitable level exists, or None if the size is too large.
+    fn get_level_from_size(&self, size: usize) -> Option<usize> {
+        let mut level = 0;
+        let mut block_size = self.max_size();
+        while block_size > size && level + 1 < self.levels {
+            level += 1;
+            block_size >>= 1;
+        }
+        if size > block_size { None } else { Some(level) }
+    }
+
+    /// Attempts to get a free block at the specified level, splitting higher blocks if needed.
+    ///
+    /// # Arguments
+    /// * `level` - The buddy level to allocate from
+    ///
+    /// Returns Some(NonNull) if a block is available, or None if out of memory.
+    fn get_free_block(&mut self, level: usize) -> Option<NonNull<()>> {
+        if let Some(block) = self.free_lists[level].pop_front() {
+            Some(block)
+        } else {
+            self.split_level(level)
+        }
+    }
+
+    /// Splits a block from the next higher level to create two blocks at the current level.
+    ///
+    /// # Arguments
+    /// * `level` - The buddy level to split to
+    ///
+    /// Returns Some(NonNull) if a block is available, or None if out of memory.
+    fn split_level(&mut self, level: usize) -> Option<NonNull<()>> {
+        if level == 0 {
+            return None;
+        }
+        if let Some(block) = self.get_free_block(level - 1) {
+            let block_size = self.block_size(level);
+            let buddy_addr = (block.as_ptr() as usize) + block_size;
+            let buddy_ptr = NonNull::new(buddy_addr as *mut ()).unwrap();
+            self.free_lists[level].push_back(buddy_ptr);
+            Some(block)
+        } else {
+            None
+        }
+    }
+
+    /// Recursively merges a freed block with its buddy if possible, to reduce fragmentation.
+    ///
+    /// # Arguments
+    /// * `level` - The buddy level of the block
+    /// * `ptr` - The pointer to the block being freed
+    fn merge_buddies(&mut self, level: usize, ptr: NonNull<()>) {
+        if level == 0 {
+            self.free_lists[level].push_back(ptr);
+            return;
+        }
+        let block_size = self.block_size(level);
+        let base = self.heap_start.as_u64() as usize;
+        let offset = (ptr.as_ptr() as usize) - base;
+        let buddy_offset = offset ^ block_size;
+        let buddy_addr = base + buddy_offset;
+        let buddy_ptr = NonNull::new(buddy_addr as *mut ()).unwrap();
+
+        if let Some(pos) = self.free_lists[level].iter().position(|&p| p == buddy_ptr) {
+            self.free_lists[level].remove(pos);
+            let merged_ptr = if buddy_addr < ptr.as_ptr() as usize {
+                buddy_ptr
+            } else {
+                ptr
+            };
+            self.merge_buddies(level - 1, merged_ptr);
+        } else {
+            self.free_lists[level].push_back(ptr);
+        }
+    }
+
+    /// Allocates a contiguous region of virtual pages.
+    ///
+    /// # Arguments
+    /// * `num_pages` - The number of contiguous pages to allocate
+    ///
+    /// Returns a PageAllocLayout describing the allocation, or an error if allocation fails.
     pub fn allocate_pages(
         &mut self,
         num_pages: usize,
     ) -> Result<PageAllocLayout, MapToError<Size4KiB>> {
         let size = (num_pages * 4096).next_power_of_two();
-
         let level = self
-            .allocator
             .get_level_from_size(size)
             .expect("Invalid size for page allocation");
 
         let block = self
-            .allocator
             .get_free_block(level)
             .expect("OOM while allocating pages");
 
@@ -444,11 +613,15 @@ impl<const L: usize> PageAllocator<L> {
         ))
     }
 
-    /// Deallocates an allocated amount of pages
+    /// Deallocates a previously allocated region of virtual pages.
+    ///
+    /// # Arguments
+    /// * `info` - The PageAllocLayout describing the region to deallocate
+    ///
+    /// Returns Ok(()) on success, or an error if deallocation fails.
     pub fn deallocate_pages(&mut self, info: PageAllocLayout) -> Result<(), UnmapError> {
         let size = (info.length * 4096).next_power_of_two();
         let level = self
-            .allocator
             .get_level_from_size(size)
             .expect("Invalid size for page allocation");
 
@@ -468,7 +641,7 @@ impl<const L: usize> PageAllocator<L> {
             flusher.flush();
         }
 
-        self.allocator.merge_buddies(
+        self.merge_buddies(
             level,
             NonNull::new(info.page.start_address().as_u64() as *mut ()).unwrap(),
         );
