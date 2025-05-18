@@ -107,49 +107,47 @@ struct TaskRegisters {
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
 unsafe extern "x86-interrupt" fn schedule() {
-    unsafe {
-        naked_asm!(
-            "push rax",
-            "push rbx",
-            "push rcx",
-            "push rdx",
-            "push rsi",
-            "push rdi",
-            "push rbp",
-            "push r8",
-            "push r9",
-            "push r10",
-            "push r11",
-            "push r12",
-            "push r13",
-            "push r14",
-            "push r15",
-            "mov rdi, rsp", // put current task's stack pointer
-            "call schedule_inner", // call scheduler with rsp
-            // send EOI to lapic using MSR 0x80B
-            "xor eax, eax",
-            "xor edx, edx",
-            "mov ecx, 0x80B",
-            "wrmsr",
-            // pop new task registers in reverse order
-            "pop r15",
-            "pop r14",
-            "pop r13",
-            "pop r12",
-            "pop r11",
-            "pop r10",
-            "pop r9",
-            "pop r8",
-            "pop rbp",
-            "pop rdi",
-            "pop rsi",
-            "pop rdx",
-            "pop rcx",
-            "pop rbx",
-            "pop rax",
-            "iretq",
-        );
-    }
+    naked_asm!(
+        "push rax",
+        "push rbx",
+        "push rcx",
+        "push rdx",
+        "push rsi",
+        "push rdi",
+        "push rbp",
+        "push r8",
+        "push r9",
+        "push r10",
+        "push r11",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+        "mov rdi, rsp", // put current task's stack pointer
+        "call schedule_inner", // call scheduler with rsp
+        // send EOI to lapic using MSR 0x80B
+        "xor eax, eax",
+        "xor edx, edx",
+        "mov ecx, 0x80B",
+        "wrmsr",
+        // pop new task registers in reverse order
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rbp",
+        "pop rdi",
+        "pop rsi",
+        "pop rdx",
+        "pop rcx",
+        "pop rbx",
+        "pop rax",
+        "iretq",
+    );
 }
 
 /// inner function to switch tasks
