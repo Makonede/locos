@@ -1,3 +1,4 @@
+pub mod freelist;
 pub mod alloc;
 pub mod paging;
 

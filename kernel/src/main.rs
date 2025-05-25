@@ -30,6 +30,7 @@ extern crate alloc;
 
 use core::{arch::asm, panic::PanicInfo};
 
+use alloc::vec::Vec;
 use gdt::init_gdt;
 use interrupts::{init_idt, setup_apic};
 use limine::{
@@ -76,10 +77,17 @@ unsafe extern "C" fn kernel_main() -> ! {
         .map(|entry| entry.length)
         .sum::<u64>();
 
+    let usable_regions = memory_regions
+        .iter()
+        .filter(|entry| entry.entry_type == EntryType::USABLE)
+        .map(|entry| entry.length)
+        .collect::<Vec<_>>();
+
     debug!(
-        "Total usable memory: {} bytes ({:.2} GiB)",
+        "Total usable memory: {} bytes ({:.2} GiB) spread over {:?} regions",
         usable_regions_sum,
-        usable_regions_sum as f64 / (1024.0 * 1024.0 * 1024.0)
+        usable_regions_sum as f64 / (1024.0 * 1024.0 * 1024.0),
+        usable_regions,
     );
     init_page_allocator(usable_regions_sum);
 

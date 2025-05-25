@@ -14,7 +14,7 @@ use x86_64::{
     },
 };
 
-use super::{FRAME_ALLOCATOR, PAGE_TABLE};
+use super::{freelist::{FreeList, Node}, FRAME_ALLOCATOR, PAGE_TABLE};
 
 pub static PAGE_ALLOCATOR: Mutex<Option<PageAllocator>> = Mutex::new(None);
 
@@ -113,108 +113,6 @@ impl<A> Locked<A> {
     }
 }
 
-/// A linked list of free memory blocks used in the buddy allocator
-///
-/// Each list tracks available blocks of a specific size, with nodes storing
-/// only the next pointer to minimize overhead. The list is manipulated through
-/// synchronized mutex access in the buddy allocator.
-#[derive(Clone, Copy, Debug)]
-struct FreeList {
-    head: Option<NonNull<Node>>,
-    len: usize,
-}
-
-impl FreeList {
-    pub const fn new() -> Self {
-        FreeList { head: None, len: 0 }
-    }
-
-    /// Pushes a new block onto the free list
-    pub const fn push(&mut self, ptr: NonNull<()>) {
-        let node = ptr.cast::<Node>();
-        unsafe {
-            node.write(Node { next: self.head });
-        }
-        self.head = Some(node);
-        self.len += 1;
-    }
-
-    /// Pops a block from the free list
-    pub const fn pop(&mut self) -> Option<NonNull<()>> {
-        if let Some(node) = self.head {
-            self.head = unsafe { node.as_ref().next };
-            self.len -= 1;
-            Some(node.cast())
-        } else {
-            None
-        }
-    }
-
-    /// Checks if a block is in the free list
-    ///
-    /// This method takes O(n) time
-    pub fn exists(&self, ptr: NonNull<()>) -> bool {
-        let mut current = self.head;
-
-        while let Some(node) = current {
-            if node == ptr.cast::<Node>() {
-                return true;
-            }
-
-            current = unsafe { node.as_ref().next };
-        }
-
-        false
-    }
-
-    /// Removes a block from the free list
-    ///
-    /// This method takes O(n) time
-    pub fn remove(&mut self, ptr: NonNull<()>) {
-        let mut current = self.head;
-        let mut prev: Option<NonNull<Node>> = None;
-
-        while let Some(node) = current {
-            if node == ptr.cast::<Node>() {
-                if let Some(mut prev) = prev {
-                    unsafe {
-                        prev.as_mut().next = node.as_ref().next;
-                    }
-                } else {
-                    self.head = unsafe { node.as_ref().next };
-                }
-                self.len -= 1;
-                return;
-            }
-
-            prev = current;
-            current = unsafe { node.as_ref().next };
-        }
-    }
-
-    #[expect(unused)]
-    pub const fn len(&self) -> usize {
-        self.len
-    }
-
-    #[expect(unused)]
-    pub const fn is_empty(&self) -> bool {
-        self.head.is_none()
-    }
-}
-
-/// A node in the free list containing just a next pointer
-///
-/// Nodes are embedded directly in the free memory blocks they represent,
-/// allowing the memory to be reused when allocated.
-#[derive(Clone, Copy, Debug)]
-struct Node {
-    next: Option<NonNull<Node>>,
-}
-
-// Safety: Node contains only a NonNull pointer which is used exclusively
-// through synchronized mutex access in BuddyAlloc's implementation
-unsafe impl Send for Node {}
 
 /// A buddy allocator for managing heap memory allocations
 ///
