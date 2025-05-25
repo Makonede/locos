@@ -1,6 +1,6 @@
 use core::ptr::NonNull;
 
-use crate::{debug, info};
+use crate::{debug, info, memory::freelist::FreeList};
 use limine::memory_map::{Entry, EntryType};
 use spin::Mutex;
 use x86_64::{
@@ -13,58 +13,142 @@ use x86_64::{
 pub static FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
 pub static PAGE_TABLE: Mutex<Option<OffsetPageTable>> = Mutex::new(None);
 
-/// A linked list of free frames.
-#[derive(Clone, Copy, Debug)]
-struct FrameFreeList {
-    head: Option<NonNull<FrameNode>>,
-    len: usize,
+/// A frame buddy allocator that manages multiple free lists for frames
+/// N is the max number of levels, only adjustable at compile time
+/// 
+/// all methods work with virtual memory. It is assumed that there is an hddm offset present
+/// and that the wrapper type handles the conversion.
+pub struct FrameBuddyAllocator<const N: usize = 26> {
+    free_lists: [FreeList; N],
+    levels: usize,
+    virt_start: usize,
+    virt_end: usize,
 }
 
-unsafe impl Send for FrameFreeList {}
+impl<const N: usize> FrameBuddyAllocator<N> {
+    /// Creates a new FrameBuddyAllocator with the specified levels, start, and end addresses.
+    /// 
+    /// # Safety
+    /// Must be aligned to 4096 bytes (page size).
+    /// Memory regions must be valid and not used elsewhere.
+    pub const unsafe fn new(levels: usize, start: usize, end: usize) -> Self {
+        assert!(
+            start % 4096 == 0,
+            "start must be page aligned"
+        );
+        assert!(
+            end % 4096 == 0,
+            "end must be page aligned"
+        );
+        let region_size = end - start;
+        let expected_size = (1 << (levels - 1)) * 4096;
+        assert!(
+            region_size == expected_size,
+            "region size does not match levels"
+        );
 
-impl FrameFreeList {
-    /// Creates a new empty free list.
-    const fn new() -> Self {
-        FrameFreeList { head: None, len: 0 }
-    }
+        let mut free_lists = [FreeList::new(); N];
 
-    /// Pushes a frame onto the free list.
-    const fn push(&mut self, ptr: NonNull<()>) {
-        let node = ptr.cast::<FrameNode>();
-        unsafe {
-            node.write(FrameNode { next: self.head });
+        free_lists[0].push(NonNull::new(start as *mut ()).unwrap());
+
+        Self {
+            free_lists,
+            levels,
+            virt_start: start,
+            virt_end: end,
         }
-        self.head = Some(node);
-        self.len += 1;
     }
 
-    /// Pops a frame from the free list.
-    const fn pop(&mut self) -> Option<NonNull<()>> {
-        if let Some(node) = self.head {
-            self.head = unsafe { node.as_ref().next };
-            self.len -= 1;
-            Some(node.cast())
+    /// Returns the block size for a given level.
+    fn block_size(&self, level: usize) -> usize {
+        (self.virt_end - self.virt_start) >> level
+    }
+
+    /// Returns the smallest buddy level that can fit the requested size.
+    fn get_level_from_size(&self, size: usize) -> Option<usize> {
+        let mut level = 0;
+        let mut block_size = self.virt_end - self.virt_start;
+        while block_size > size && (level + 1) < self.levels {
+            level += 1;
+            block_size >>= 1;
+        }
+        if size > block_size { None } else { Some(level) }
+    }
+
+    /// Attempts to get a free block at the specified level, splitting higher blocks if needed.
+    fn get_free_block(&mut self, level: usize) -> Option<NonNull<()>> {
+        if let Some(block) = self.free_lists[level].pop() {
+            Some(block)
+        } else {
+            self.split_level(level)
+        }
+    }
+
+    /// Splits a block from the next higher level to create two blocks at the current level.
+    fn split_level(&mut self, level: usize) -> Option<NonNull<()>> {
+        if level == 0 {
+            return None;
+        }
+        if let Some(block) = self.get_free_block(level - 1) {
+            let block_size = self.block_size(level);
+            let buddy_addr = (block.as_ptr() as usize) + block_size;
+            let buddy_ptr = NonNull::new(buddy_addr as *mut ()).unwrap();
+            self.free_lists[level].push(buddy_ptr);
+            Some(block)
         } else {
             None
         }
     }
 
-    const fn len(&self) -> usize {
-        self.len
+    /// Recursively merges a freed block with its buddy if possible, to reduce fragmentation.
+    fn merge_buddies(&mut self, level: usize, ptr: NonNull<()>) {
+        if level == 0 {
+            self.free_lists[level].push(ptr);
+            return;
+        }
+        let block_size = self.block_size(level);
+        let base = self.virt_start;
+        let offset = (ptr.as_ptr() as usize) - base;
+        let buddy_offset = offset ^ block_size;
+        let buddy_addr = base + buddy_offset;
+        let buddy_ptr = NonNull::new(buddy_addr as *mut ()).unwrap();
+
+        if self.free_lists[level].exists(buddy_ptr) {
+            self.free_lists[level].remove(buddy_ptr);
+            let merged_ptr = if buddy_addr < ptr.as_ptr() as usize {
+                buddy_ptr
+            } else {
+                ptr
+            };
+            self.merge_buddies(level - 1, merged_ptr);
+        } else {
+            self.free_lists[level].push(ptr);
+        }
+    }
+
+    /// Allocates a contiguous block of 2^order frames (order=0 means 1 frame).
+    pub fn allocate_contiguous_frames(&mut self, frames: usize) -> Option<u64> {
+        let size = 4096 * frames;
+        let level = self.get_level_from_size(size)?;
+        let block = self.get_free_block(level)?;
+        Some(block.as_ptr() as u64)
+    }
+
+    /// Deallocates a contiguous block of 2^order frames.
+    /// 
+    /// # Safety
+    /// The caller must ensure that the block was allocated by this allocator and is not in use.
+    pub unsafe fn deallocate_contiguous_frames(&mut self, addr: u64, frames: usize) {
+        let ptr = NonNull::new(addr as *mut ()).unwrap();
+        let size = 4096 * frames;
+        let level = self.get_level_from_size(size).unwrap();
+        self.merge_buddies(level, ptr);
     }
 }
 
-/// A node in the linked list of free frames.
-#[derive(Clone, Copy, Debug)]
-struct FrameNode {
-    next: Option<NonNull<FrameNode>>,
-}
-
-unsafe impl Send for FrameNode {}
-
 /// A frame allocator that returns frames from the memory regions provided by the bootloader.
 pub struct BootInfoFrameAllocator {
-    memory_map: FrameFreeList,
+    memory_map: FreeList,
     offset: u64,
 }
 
@@ -84,7 +168,7 @@ impl BootInfoFrameAllocator {
             .map(|frame| unsafe { NonNull::new_unchecked(frame as *mut ()) });
 
         let mut returned = Self {
-            memory_map: FrameFreeList::new(),
+            memory_map: FreeList::new(),
             offset,
         };
 
