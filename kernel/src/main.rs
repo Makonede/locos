@@ -34,17 +34,17 @@ use alloc::vec::Vec;
 use gdt::init_gdt;
 use interrupts::{init_idt, setup_apic};
 use limine::{
-    BaseRevision,
-    memory_map::EntryType,
-    request::{
+    memory_map::EntryType, request::{
         FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
-        RsdpRequest,
-    },
+        RsdpRequest, StackSizeRequest,
+    }, BaseRevision
 };
 use memory::{init_frame_allocator, init_heap, init_page_allocator, paging};
 use meta::print_welcome;
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
+
+pub const STACK_SIZE: u64 = 0x100000;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kernel_main() -> ! {
@@ -124,6 +124,10 @@ unsafe extern "C" fn kernel_main() -> ! {
 #[used]
 #[unsafe(link_section = ".requests")]
 pub static BASE_REVISION: BaseRevision = BaseRevision::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(STACK_SIZE);
 
 #[used]
 #[unsafe(link_section = ".requests")]

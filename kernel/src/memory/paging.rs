@@ -10,7 +10,7 @@ use x86_64::{
     },
 };
 
-pub static FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
+pub static FRAME_ALLOCATOR: Mutex<Option<FrameBuddyAllocatorForest>> = Mutex::new(None);
 pub static PAGE_TABLE: Mutex<Option<OffsetPageTable>> = Mutex::new(None);
 
 /// A frame buddy allocator that manages multiple free lists for frames
@@ -18,20 +18,24 @@ pub static PAGE_TABLE: Mutex<Option<OffsetPageTable>> = Mutex::new(None);
 /// 
 /// all methods work with virtual memory. It is assumed that there is an hddm offset present
 /// and that the wrapper type handles the conversion.
-pub struct FrameBuddyAllocator<const N: usize = 26> {
-    free_lists: [FreeList; N],
+pub struct FrameBuddyAllocator<const L: usize = 26> {
+    free_lists: [FreeList; L],
     levels: usize,
     virt_start: usize,
     virt_end: usize,
 }
 
-impl<const N: usize> FrameBuddyAllocator<N> {
+impl<const L: usize> FrameBuddyAllocator<L> {
     /// Creates a new FrameBuddyAllocator with the specified levels, start, and end addresses.
     /// 
     /// # Safety
     /// Must be aligned to 4096 bytes (page size).
     /// Memory regions must be valid and not used elsewhere.
     pub const unsafe fn new(levels: usize, start: usize, end: usize) -> Self {
+        assert!(
+            levels >= 2,
+            "buddy allocator needs at least 2 levels"
+        );
         assert!(
             start % 4096 == 0,
             "start must be page aligned"
@@ -47,7 +51,7 @@ impl<const N: usize> FrameBuddyAllocator<N> {
             "region size does not match levels"
         );
 
-        let mut free_lists = [FreeList::new(); N];
+        let mut free_lists = [FreeList::new(); L];
 
         free_lists[0].push(NonNull::new(start as *mut ()).unwrap());
 
@@ -126,7 +130,7 @@ impl<const N: usize> FrameBuddyAllocator<N> {
         }
     }
 
-    /// Allocates a contiguous block of 2^order frames (order=0 means 1 frame).
+    /// Allocates a contiguous block of frames. Rounds up to the nearest power of two.
     pub fn allocate_contiguous_frames(&mut self, frames: usize) -> Option<u64> {
         let size = 4096 * frames;
         let level = self.get_level_from_size(size)?;
@@ -134,7 +138,7 @@ impl<const N: usize> FrameBuddyAllocator<N> {
         Some(block.as_ptr() as u64)
     }
 
-    /// Deallocates a contiguous block of 2^order frames.
+    /// Deallocates a contiguous block of frames, merging with buddies if possible.
     /// 
     /// # Safety
     /// The caller must ensure that the block was allocated by this allocator and is not in use.
@@ -146,63 +150,129 @@ impl<const N: usize> FrameBuddyAllocator<N> {
     }
 }
 
-/// A frame allocator that returns frames from the memory regions provided by the bootloader.
-pub struct BootInfoFrameAllocator {
-    memory_map: FreeList,
-    offset: u64,
+/// A forest of frame buddy allocators, each with its own free lists for different levels.
+/// 
+/// This allows for multiple independent allocators, each managing its own memory region.
+/// N is the max number of possible allocators, only adjustable at compile time.
+pub struct FrameBuddyAllocatorForest<const N: usize = 100, const L: usize = 26> {
+    allocators: [Option<FrameBuddyAllocator<L>>; N],
+    count: usize,
+    hddm_offset: u64,
 }
 
-impl BootInfoFrameAllocator {
-    /// Initializes a new frame allocator with the given memory map.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that the memory map is valid.
-    pub unsafe fn init(memory_map: &'static [&Entry], offset: u64) -> Self {
-        let usable_regions = memory_map
-            .iter()
-            .filter(|region| region.entry_type == EntryType::USABLE)
-            .map(|region| region.base..(region.base + region.length))
-            .flat_map(|region_range| region_range.step_by(4096))
-            .map(|base| base + offset)
-            .map(|frame| unsafe { NonNull::new_unchecked(frame as *mut ()) });
-
-        let mut returned = Self {
-            memory_map: FreeList::new(),
-            offset,
-        };
-
-        for frame in usable_regions {
-            returned.memory_map.push(frame);
+impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
+    pub fn init(memory_regions: &[&Entry], min_allocator_frames: usize, hddm_offset: u64) -> Self {
+        if min_allocator_frames < 2 {
+            panic!("min_allocator_frames must be at least 2 for buddy allocation");
         }
+        if !min_allocator_frames.is_power_of_two() {
+            panic!("min_allocator_frames must be a power of 2");
+        }
+        
+        let mut allocators = [const { None }; N];
+        let mut count = 0;
+        let mut allocator_configs = [(0usize, 0usize, 0usize); N];
+        let mut allocator_count = 0;
+        
+        for region in memory_regions {
+            if region.entry_type != EntryType::USABLE {
+                debug!("non usable");
+                continue;
+            }
 
-        debug!(
-            "frame allocator initialized with {} frames",
-            returned.memory_map.len()
-        );
+            let start = region.base as usize;
+            let length = region.length as usize;
+            let end = start.checked_add(length)
+                .expect("Memory region size causes overflow");
 
-        returned
+            let aligned_start = (start + 4095) & !4095;
+            let aligned_end = end & !4095;
+            
+            if aligned_end <= aligned_start {
+                continue;
+            }
+            
+            let aligned_length = aligned_end - aligned_start;
+            let total_frames = aligned_length / 4096;
+            let mut current_start = aligned_start;
+            let mut remaining_frames = total_frames;
+            
+            while remaining_frames >= min_allocator_frames {
+                if allocator_count >= N {
+                    panic!("Too many allocators needed, increase N parameter or use larger min_allocator_frames");
+                }
+                
+                let mut allocator_frames = 1;
+                while allocator_frames * 2 <= remaining_frames {
+                    allocator_frames *= 2;
+                }
+                
+                let allocator_size_bytes = allocator_frames.checked_mul(4096)
+                    .expect("Allocator size calculation overflow");
+                
+                allocator_configs[allocator_count] = (current_start, allocator_frames, allocator_size_bytes);
+                allocator_count += 1;
+                
+                current_start = current_start.checked_add(allocator_size_bytes)
+                    .expect("Current start address overflow");
+                remaining_frames -= allocator_frames;
+            }
+        }
+        
+        allocator_configs[..allocator_count].sort_unstable_by_key(|&(_, frames, _)| core::cmp::Reverse(frames));
+        
+        for &(start, frames, size_bytes) in allocator_configs.iter().take(allocator_count) {
+            let virt_start = start + hddm_offset as usize;
+            let virt_end = virt_start + size_bytes;
+            let levels = if frames == 1 {
+                1
+            } else {
+                frames.trailing_zeros() as usize + 1
+            };
+            
+            if levels <= L {
+                allocators[count] = Some(unsafe {
+                    FrameBuddyAllocator::<L>::new(levels, virt_start, virt_end)
+                });
+                count += 1;
+            } else {
+                panic!("Allocator requires {} levels but maximum is {}", levels, L);
+            }
+        }
+        
+        Self {
+            allocators,
+            count,
+            hddm_offset,
+        }
     }
 }
 
-/// Implement the FrameAllocator from `x86_64`` trait for BootInfoFrameAllocator.
-unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
+unsafe impl<const N: usize, const L: usize> FrameAllocator<Size4KiB> for FrameBuddyAllocatorForest<N, L> {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        if let Some(ptr) = self.memory_map.pop() {
-            let phys_ptr = PhysAddr::new((ptr.as_ptr() as u64) - self.offset); // we ball baby
-            let frame = PhysFrame::containing_address(phys_ptr);
-            Some(frame)
-        } else {
-            None
+        for allocator in self.allocators[..self.count].iter_mut().flatten() {
+            if let Some(virt_addr) = allocator.allocate_contiguous_frames(1) {
+                let phys_addr = virt_addr - self.hddm_offset;
+                return Some(PhysFrame::containing_address(PhysAddr::new(phys_addr)));
+            }
         }
+        None
     }
 }
 
-impl FrameDeallocator<Size4KiB> for BootInfoFrameAllocator {
+impl<const N: usize, const L: usize> FrameDeallocator<Size4KiB> for FrameBuddyAllocatorForest<N, L> {
     unsafe fn deallocate_frame(&mut self, frame: PhysFrame) {
-        let ptr = frame.start_address().as_u64() + self.offset;
-        let ptr = NonNull::new(ptr as *mut ()).expect("failed to convert to NonNull");
-        self.memory_map.push(ptr);
+        let phys_addr = frame.start_address().as_u64();
+        let virt_addr = phys_addr + self.hddm_offset;
+        let addr = virt_addr as usize;
+        
+        for allocator in self.allocators[..self.count].iter_mut().flatten() {
+            if addr >= allocator.virt_start && addr < allocator.virt_end {
+                unsafe { allocator.deallocate_contiguous_frames(virt_addr, 1) };
+                return;
+            }
+        }
+        panic!("Frame {:#x} not managed by any allocator", phys_addr);
     }
 }
 
@@ -211,13 +281,13 @@ impl FrameDeallocator<Size4KiB> for BootInfoFrameAllocator {
 /// # Safety
 /// The caller must ensure that the memory map is valid and not used elsewhere.
 /// This function must only be called once, before any frame allocations occur.
-pub unsafe fn init_frame_allocator(memory_map: &'static [&'static Entry], offset: u64) {
+pub unsafe fn init_frame_allocator(memory_map: &'static [&'static Entry], hddm_offset: u64) {
     if FRAME_ALLOCATOR.lock().is_some() {
         panic!("Frame allocator already initialized");
     }
-    FRAME_ALLOCATOR
-        .lock()
-        .replace(unsafe { BootInfoFrameAllocator::init(memory_map, offset) });
+    
+    let allocator = FrameBuddyAllocatorForest::init(memory_map, 0b10000, hddm_offset);
+    FRAME_ALLOCATOR.lock().replace(allocator);
 
     info!("frame allocator initialized");
 }
