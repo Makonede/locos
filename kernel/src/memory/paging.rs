@@ -1,6 +1,8 @@
 use core::ptr::NonNull;
+use core::mem::{size_of, align_of};
 
-use crate::{debug, info, memory::freelist::FreeList};
+use crate::{debug, trace};
+use crate::{info, memory::freelist::{DoubleFreeList, DoubleFreeListNode, DoubleFreeListLink}};
 use limine::memory_map::{Entry, EntryType};
 use spin::Mutex;
 use x86_64::{
@@ -13,17 +15,53 @@ use x86_64::{
 pub static FRAME_ALLOCATOR: Mutex<Option<FrameBuddyAllocatorForest>> = Mutex::new(None);
 pub static PAGE_TABLE: Mutex<Option<OffsetPageTable>> = Mutex::new(None);
 
+/// statically fills the page list with entries
+/// 
+/// looks for the first place that can fill the page list.
+pub unsafe fn fill_page_list(entries: &[&Entry], hhdm_offset: usize) {
+    assert!(size_of::<DoubleFreeListNode>() <= 32, "DoubleFreeListNode must be 32 bytes or less");
+    assert!(align_of::<DoubleFreeListNode>() == 32, "DoubleFreeListNode must be aligned to 32 bytes");
+
+    for entry in entries {
+        debug!("Processing entry: base = {:#x}, length = {:#x}, type = {:?}", entry.base, entry.length, entry.entry_type == EntryType::USABLE);
+        if !(entry.entry_type == EntryType::USABLE && entry.base != 0 && entry.length > 4096 * 4) {
+            debug!("Skipping entry: not usable or too small");
+            continue;
+        }
+
+        let entry_base = entry.base as usize + hhdm_offset;
+        let needed_entries = entry.length as usize / 4096;
+
+
+        (0..needed_entries).for_each(|i| {
+            let offset = i * align_of::<DoubleFreeListNode>();
+            let ptr = unsafe { (entry_base as *mut u8).add(offset) as usize } as *mut DoubleFreeListNode;
+            unsafe {
+                ptr.write(DoubleFreeListNode::new(
+                    DoubleFreeListLink::new(None, None),
+                    None,
+                ));
+            }
+        });
+
+        debug!("wrote to page list at {:#x} with {} entries", entry_base, needed_entries);
+    }
+}
+
 /// A frame buddy allocator that manages multiple free lists for frames
 /// N is the max number of levels, only adjustable at compile time
 /// 
 /// all methods work with virtual memory. It is assumed that there is an hddm offset present
 /// and that the wrapper type handles the conversion.
 pub struct FrameBuddyAllocator<const L: usize = 26> {
-    free_lists: [FreeList; L],
+    free_lists: [DoubleFreeList; L],
     levels: usize,
     virt_start: usize,
     virt_end: usize,
+    page_list_start: usize,
 }
+
+unsafe impl<const L: usize> Send for FrameBuddyAllocator<L> {}
 
 impl<const L: usize> FrameBuddyAllocator<L> {
     /// Creates a new FrameBuddyAllocator with the specified levels, start, and end addresses.
@@ -31,7 +69,7 @@ impl<const L: usize> FrameBuddyAllocator<L> {
     /// # Safety
     /// Must be aligned to 4096 bytes (page size).
     /// Memory regions must be valid and not used elsewhere.
-    pub const unsafe fn new(levels: usize, start: usize, end: usize) -> Self {
+    pub unsafe fn new(levels: usize, start: usize, end: usize, page_list_start: usize) -> Self {
         assert!(
             levels >= 2,
             "buddy allocator needs at least 2 levels"
@@ -51,21 +89,30 @@ impl<const L: usize> FrameBuddyAllocator<L> {
             "region size does not match levels"
         );
 
-        let mut free_lists = [FreeList::new(); L];
+        let mut free_lists = [DoubleFreeList::new(); L];
 
-        free_lists[0].push(NonNull::new(start as *mut ()).unwrap());
+        debug!("Creating FrameBuddyAllocator with {} levels, start: {:#x}, end: {:#x}, page_list_start: {:#x}",
+            levels, start, end, page_list_start
+        );
+        let page_index: u128 = (start as u128 - page_list_start as u128) / 4096; // what page in the usable region is this?
+        let page_ptr = page_index * align_of::<DoubleFreeListNode>() as u128 + page_list_start as u128; // ptr to start of managed location in local list
+        debug!("Creating FrameBuddyAllocator page_ptr: {:#x}", page_ptr);
+
+        free_lists[0].push(NonNull::new(page_ptr as *mut DoubleFreeListNode).unwrap(), region_size / 4096);
 
         Self {
             free_lists,
             levels,
             virt_start: start,
             virt_end: end,
+            page_list_start,
         }
     }
 
-    /// Returns the block size for a given level.
+    /// Returns the block size for a given level in terms of number of pages.
     fn block_size(&self, level: usize) -> usize {
-        (self.virt_end - self.virt_start) >> level
+        let total_pages = (self.virt_end - self.virt_start) / 4096;
+        total_pages >> level
     }
 
     /// Returns the smallest buddy level that can fit the requested size.
@@ -80,7 +127,7 @@ impl<const L: usize> FrameBuddyAllocator<L> {
     }
 
     /// Attempts to get a free block at the specified level, splitting higher blocks if needed.
-    fn get_free_block(&mut self, level: usize) -> Option<NonNull<()>> {
+    fn get_free_block(&mut self, level: usize) -> Option<NonNull<DoubleFreeListNode>> {
         if let Some(block) = self.free_lists[level].pop() {
             Some(block)
         } else {
@@ -89,15 +136,15 @@ impl<const L: usize> FrameBuddyAllocator<L> {
     }
 
     /// Splits a block from the next higher level to create two blocks at the current level.
-    fn split_level(&mut self, level: usize) -> Option<NonNull<()>> {
+    fn split_level(&mut self, level: usize) -> Option<NonNull<DoubleFreeListNode>> {
         if level == 0 {
             return None;
         }
         if let Some(block) = self.get_free_block(level - 1) {
-            let block_size = self.block_size(level);
+            let block_size = self.block_size(level) * align_of::<DoubleFreeListNode>();
             let buddy_addr = (block.as_ptr() as usize) + block_size;
-            let buddy_ptr = NonNull::new(buddy_addr as *mut ()).unwrap();
-            self.free_lists[level].push(buddy_ptr);
+            let buddy_ptr = NonNull::new(buddy_addr as *mut DoubleFreeListNode).unwrap();
+            self.free_lists[level].push(buddy_ptr, self.block_size(level));
             Some(block)
         } else {
             None
@@ -105,20 +152,20 @@ impl<const L: usize> FrameBuddyAllocator<L> {
     }
 
     /// Recursively merges a freed block with its buddy if possible, to reduce fragmentation.
-    fn merge_buddies(&mut self, level: usize, ptr: NonNull<()>) {
+    fn merge_buddies(&mut self, level: usize, ptr: NonNull<DoubleFreeListNode>) {
         if level == 0 {
-            self.free_lists[level].push(ptr);
+            self.free_lists[level].push(ptr, self.block_size(level));
             return;
         }
-        let block_size = self.block_size(level);
-        let base = self.virt_start;
+        let block_size = self.block_size(level) * align_of::<DoubleFreeListNode>(); // in bytes
+        let base = self.page_list_start;
         let offset = (ptr.as_ptr() as usize) - base;
         let buddy_offset = offset ^ block_size;
         let buddy_addr = base + buddy_offset;
-        let buddy_ptr = NonNull::new(buddy_addr as *mut ()).unwrap();
+        let buddy_ptr = NonNull::new(buddy_addr as *mut DoubleFreeListNode).unwrap();
 
-        if self.free_lists[level].exists(buddy_ptr) {
-            self.free_lists[level].remove(buddy_ptr);
+        if unsafe { self.free_lists[level].contains(buddy_ptr, self.block_size(level)) } {
+            unsafe { self.free_lists[level].remove(buddy_ptr) };
             let merged_ptr = if buddy_addr < ptr.as_ptr() as usize {
                 buddy_ptr
             } else {
@@ -126,7 +173,7 @@ impl<const L: usize> FrameBuddyAllocator<L> {
             };
             self.merge_buddies(level - 1, merged_ptr);
         } else {
-            self.free_lists[level].push(ptr);
+            self.free_lists[level].push(ptr, self.block_size(level));
         }
     }
 
@@ -135,7 +182,11 @@ impl<const L: usize> FrameBuddyAllocator<L> {
         let size = 4096 * frames;
         let level = self.get_level_from_size(size)?;
         let block = self.get_free_block(level)?;
-        Some(block.as_ptr() as u64)
+
+        let block_index = (block.as_ptr() as usize - self.page_list_start) / align_of::<DoubleFreeListNode>();
+        let actual_page = self.page_list_start + block_index * 4096;
+
+        Some(actual_page as u64)
     }
 
     /// Deallocates a contiguous block of frames, merging with buddies if possible.
@@ -143,7 +194,10 @@ impl<const L: usize> FrameBuddyAllocator<L> {
     /// # Safety
     /// The caller must ensure that the block was allocated by this allocator and is not in use.
     pub unsafe fn deallocate_contiguous_frames(&mut self, addr: u64, frames: usize) {
-        let ptr = NonNull::new(addr as *mut ()).unwrap();
+        let page_index = (addr as usize - self.page_list_start) / 4096; // index from start of this region's pages list
+
+        let ptr = NonNull::new((self.page_list_start + page_index * align_of::<DoubleFreeListNode>()) as *mut DoubleFreeListNode).unwrap();
+
         let size = 4096 * frames;
         let level = self.get_level_from_size(size).unwrap();
         self.merge_buddies(level, ptr);
@@ -171,32 +225,24 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
         
         let mut allocators = [const { None }; N];
         let mut count = 0;
-        let mut allocator_configs = [(0usize, 0usize, 0usize); N];
+        let mut allocator_configs = [(0usize, 0usize, 0usize, 0usize); N]; // (virt_start, frames, size_bytes, list_start)
         let mut allocator_count = 0;
         
         for region in memory_regions {
             if region.entry_type != EntryType::USABLE {
-                debug!("non usable");
                 continue;
             }
 
             let start = region.base as usize;
             let length = region.length as usize;
-            let end = start.checked_add(length)
-                .expect("Memory region size causes overflow");
+            
+            let total_frames = length / 4096;
 
-            let aligned_start = (start + 4095) & !4095;
-            let aligned_end = end & !4095;
-            
-            if aligned_end <= aligned_start {
-                continue;
-            }
-            
-            let aligned_length = aligned_end - aligned_start;
-            let total_frames = aligned_length / 4096;
-            let mut current_start = aligned_start;
-            let mut remaining_frames = total_frames;
-            
+            let pages_reserved_for_indexing = (total_frames * align_of::<DoubleFreeListNode>()).next_multiple_of(4096);
+
+            let mut current_start = start + pages_reserved_for_indexing;
+            let mut remaining_frames = total_frames - pages_reserved_for_indexing / 4096;
+
             while remaining_frames >= min_allocator_frames {
                 if allocator_count >= N {
                     panic!("Too many allocators needed, increase N parameter or use larger min_allocator_frames");
@@ -210,7 +256,7 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
                 let allocator_size_bytes = allocator_frames.checked_mul(4096)
                     .expect("Allocator size calculation overflow");
                 
-                allocator_configs[allocator_count] = (current_start, allocator_frames, allocator_size_bytes);
+                allocator_configs[allocator_count] = (current_start, allocator_frames, allocator_size_bytes, start + hddm_offset as usize);
                 allocator_count += 1;
                 
                 current_start = current_start.checked_add(allocator_size_bytes)
@@ -219,20 +265,21 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
             }
         }
         
-        allocator_configs[..allocator_count].sort_unstable_by_key(|&(_, frames, _)| core::cmp::Reverse(frames));
+        allocator_configs[..allocator_count].sort_unstable_by_key(|&(_, frames, _, _)| core::cmp::Reverse(frames));
         
-        for &(start, frames, size_bytes) in allocator_configs.iter().take(allocator_count) {
-            let virt_start = start + hddm_offset as usize;
+        for &(reg_start, frames, size_bytes, start) in allocator_configs.iter().take(allocator_count) {
+            let virt_start = reg_start + hddm_offset as usize;
             let virt_end = virt_start + size_bytes;
             let levels = if frames == 1 {
                 1
             } else {
                 frames.trailing_zeros() as usize + 1
             };
+
             
             if levels <= L {
                 allocators[count] = Some(unsafe {
-                    FrameBuddyAllocator::<L>::new(levels, virt_start, virt_end)
+                    FrameBuddyAllocator::<L>::new(levels, virt_start, virt_end, start)
                 });
                 count += 1;
             } else {
@@ -281,6 +328,8 @@ impl<const N: usize, const L: usize> FrameDeallocator<Size4KiB> for FrameBuddyAl
 /// # Safety
 /// The caller must ensure that the memory map is valid and not used elsewhere.
 /// This function must only be called once, before any frame allocations occur.
+/// 
+/// reserved_region is a tuple of (start, end) in bytes, which is reserved for the page list.
 pub unsafe fn init_frame_allocator(memory_map: &'static [&'static Entry], hddm_offset: u64) {
     if FRAME_ALLOCATOR.lock().is_some() {
         panic!("Frame allocator already initialized");

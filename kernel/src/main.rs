@@ -39,7 +39,7 @@ use limine::{
         RsdpRequest, StackSizeRequest,
     }, BaseRevision
 };
-use memory::{init_frame_allocator, init_heap, init_page_allocator, paging};
+use memory::{init_frame_allocator, init_heap, init_page_allocator, paging::{self, fill_page_list}};
 use meta::print_welcome;
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
@@ -62,6 +62,16 @@ unsafe extern "C" fn kernel_main() -> ! {
         .expect("Hhdm request failed")
         .offset();
 
+    for entry in memory_regions {
+        debug!(
+            "Memory region: base = {:#x} - {:#x}, usable = {:?}",
+            entry.base + physical_memory_offset, entry.base + physical_memory_offset + entry.length, entry.entry_type == EntryType::USABLE,
+        );
+    }
+
+    debug!("Physical memory offset: {:#x}", physical_memory_offset);
+    unsafe { fill_page_list(memory_regions, physical_memory_offset as usize) };
+    debug!("Filling page list done");
     unsafe { init_frame_allocator(memory_regions, physical_memory_offset) };
 
     unsafe { paging::init(VirtAddr::new(physical_memory_offset)) };
