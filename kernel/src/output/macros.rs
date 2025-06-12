@@ -16,48 +16,88 @@ macro_rules! print {
 }
 
 /// Logs an error message with a red "ERROR: " prefix.
+#[cfg(feature = "log-error")]
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)*) => {
-        $crate::println!("\x1b[31mERROR:\x1b[0m {}", format_args!($($arg)*));
-        $crate::serial_println!("\x1b[31mERROR:\x1b[0m {}", format_args!($($arg)*));
+        $crate::println!("[31mERROR:[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("[31mERROR:[0m {}", format_args!($($arg)*));
     };
+}
+
+/// No-op error macro when log-error feature is disabled.
+#[cfg(not(feature = "log-error"))]
+#[macro_export]
+macro_rules! error {
+    ($($arg:tt)*) => {};
 }
 
 /// Logs a warning message with a yellow "WARN: " prefix.
+#[cfg(feature = "log-warn")]
 #[macro_export]
 macro_rules! warn {
     ($($arg:tt)*) => {
-        $crate::println!("\x1b[33mWARN:\x1b[0m {}", format_args!($($arg)*));
-        $crate::serial_println!("\x1b[33mWARN:\x1b[0m {}", format_args!($($arg)*));
+        $crate::println!("[33mWARN:[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("[33mWARN:[0m {}", format_args!($($arg)*));
     };
+}
+
+/// No-op warn macro when log-warn feature is disabled.
+#[cfg(not(feature = "log-warn"))]
+#[macro_export]
+macro_rules! warn {
+    ($($arg:tt)*) => {};
 }
 
 /// Logs an info message with a green "INFO: " prefix.
+#[cfg(feature = "log-info")]
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => {
-        $crate::println!("\x1b[32mINFO:\x1b[0m {}", format_args!($($arg)*));
-        $crate::serial_println!("\x1b[32mINFO:\x1b[0m {}", format_args!($($arg)*));
+        $crate::println!("[32mINFO:[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("[32mINFO:[0m {}", format_args!($($arg)*));
     };
+}
+
+/// No-op info macro when log-info feature is disabled.
+#[cfg(not(feature = "log-info"))]
+#[macro_export]
+macro_rules! info {
+    ($($arg:tt)*) => {};
 }
 
 /// Logs a debug message with a green "DEBUG: " prefix.
+#[cfg(feature = "log-debug")]
 #[macro_export]
 macro_rules! debug {
     ($($arg:tt)*) => {
-        $crate::println!("\x1b[32mDEBUG:\x1b[0m {}", format_args!($($arg)*));
-        $crate::serial_println!("\x1b[32mDEBUG:\x1b[0m {}", format_args!($($arg)*));
+        $crate::println!("[32mDEBUG:[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("[32mDEBUG:[0m {}", format_args!($($arg)*));
     };
 }
 
+/// No-op debug macro when log-debug feature is disabled.
+#[cfg(not(feature = "log-debug"))]
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)*) => {};
+}
+
 /// Logs a trace message with a light blue "TRACE: " prefix.
+#[cfg(feature = "log-trace")]
 #[macro_export]
 macro_rules! trace {
     ($($arg:tt)*) => {
-        $crate::println!("\x1b[36mTRACE:\x1b[0m {}", format_args!($($arg)*));
-        $crate::serial_println!("\x1b[36mTRACE:\x1b[0m {}", format_args!($($arg)*));
+        $crate::println!("[36mTRACE:[0m {}", format_args!($($arg)*));
+        $crate::serial_println!("[36mTRACE:[0m {}", format_args!($($arg)*));
     };
+}
+
+/// No-op trace macro when log-trace feature is disabled.
+#[cfg(not(feature = "log-trace"))]
+#[macro_export]
+macro_rules! trace {
+    ($($arg:tt)*) => {};
 }
 
 /// Global println! macro that writes to the framebuffer.
