@@ -2,20 +2,23 @@ use core::{arch::naked_asm, ptr::NonNull};
 
 use alloc::collections::vec_deque::VecDeque;
 use spin::Mutex;
-use x86_64::registers::{
-    rflags::{self},
-    segmentation::{CS, SS, Segment},
-};
+use x86_64::{registers::{
+    control::Cr3, rflags::{self}, segmentation::{Segment, CS, SS}
+}, structures::paging::PhysFrame, PhysAddr};
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 
-/// adds a new task to the scheduler
+/// stack size of kernel task in pages. Must be power of 2
+const KSTACK_SIZE: u8 = 4;
+
+/// adds a new kernel task to the scheduler
+/// Each kernel task has a stack size of KSTACK_SIZE - 1, for a guard page
 ///
 /// task should be a pointer to the function to run
-/// stack_size is the size of the stack for the task in pages
-pub fn create_task(task: NonNull<()>, stack_size: usize) {
+pub fn create_kernel_task(task: NonNull<()>) {
     let scheduler = TASK_SCHEDULER.lock();
     let task = ProcessControlBlock {
+        task_type: TaskType::Kernel,
         regs: TaskRegisters {
             rax: 0,
             rbx: 0,
@@ -40,9 +43,12 @@ pub fn create_task(task: NonNull<()>, stack_size: usize) {
             interrupt_ss: SS::get_reg().0 as u64,
         },
         state: TaskState::Ready,
+        cr3: Cr3::read().0,
     };
     scheduler.task_list.push_back(task);
 }
+
+
 
 struct TaskScheduler {
     task_list: VecDeque<ProcessControlBlock>,
@@ -62,8 +68,11 @@ impl TaskScheduler {
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 struct ProcessControlBlock {
+    pub task_type: TaskType,
     pub regs: TaskRegisters,
     pub state: TaskState,
+    /// page table for process
+    pub cr3: PhysFrame,
 }
 
 /// State of a task
@@ -75,6 +84,13 @@ enum TaskState {
     Ready,
     Running,
     Terminated,
+}
+
+/// Type of a task
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TaskType {
+    Kernel,
+    User, // TODO!
 }
 
 // Stores task registers in reverse order of stack push during context switch

@@ -106,9 +106,9 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
     let mut final_lapic = lapic.build().unwrap();
 
     unsafe {
-        (*IDT.as_mut_ptr())[LAPIC_TIMER_VECTOR].set_handler_fn(lapic_timer_handler);
-        (*IDT.as_mut_ptr())[LAPIC_ERROR_VECTOR].set_handler_fn(lapic_error_handler);
-        (*IDT.as_mut_ptr())[LAPIC_SPURIOUS_VECTOR].set_handler_fn(spurious_handler);
+        (&mut (*IDT.as_mut_ptr()))[LAPIC_TIMER_VECTOR].set_handler_fn(lapic_timer_handler);
+        (&mut (*IDT.as_mut_ptr()))[LAPIC_ERROR_VECTOR].set_handler_fn(lapic_error_handler);
+        (&mut (*IDT.as_mut_ptr()))[LAPIC_SPURIOUS_VECTOR].set_handler_fn(spurious_handler);
     }
 
     unsafe { final_lapic.enable() };
@@ -180,7 +180,7 @@ fn setup_ioapic_timer(ioapics: &mut [(x2apic::ioapic::IoApic, u32)], timer_gsi: 
         unsafe { ioapic.set_table_entry((timer_gsi - *gsi_base) as u8, entry) };
     }
 
-    unsafe { (*IDT.as_mut_ptr())[IOAPIC_TIMER_VECTOR].set_handler_fn(ioapic_timer_handler) };
+    unsafe { (&mut (*IDT.as_mut_ptr()))[IOAPIC_TIMER_VECTOR].set_handler_fn(ioapic_timer_handler) };
 
     for (ioapic, gsi_base) in ioapics.iter_mut() {
         if !(*gsi_base..*gsi_base + unsafe { ioapic.max_table_entry() } as u32 + 1)
