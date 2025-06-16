@@ -18,6 +18,14 @@ pub static PAGE_TABLE: Mutex<Option<OffsetPageTable>> = Mutex::new(None);
 /// statically fills the page list with entries
 /// 
 /// looks for the first place that can fill the page list.
+///
+/// # Safety
+/// 
+/// The caller must ensure that:
+/// - The `entries` contain valid memory regions that are safe to write to
+/// - The `hhdm_offset` correctly represents the higher half direct mapping offset
+/// - The memory being written to is not currently in use by other system components
+/// - No other code is concurrently accessing the same memory regions
 pub unsafe fn fill_page_list(entries: &[&Entry], hhdm_offset: usize) {
     assert!(size_of::<DoubleFreeListNode>() <= 32, "DoubleFreeListNode must be 32 bytes or less");
     assert!(align_of::<DoubleFreeListNode>() == 32, "DoubleFreeListNode must be aligned to 32 bytes");
@@ -292,6 +300,36 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
             count,
             hddm_offset,
         }
+    }
+}
+
+impl <const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
+    /// returns a virtual address the start of a contiguous block of frames
+    pub fn allocate_pages(&mut self, pages: usize) -> Option<VirtAddr> {
+        assert!(pages.is_power_of_two(), "Number of pages must be a power of two");
+
+        for allocator in self.allocators[..self.count].iter_mut().flatten() {
+            if let Some(virt_addr) = allocator.allocate_contiguous_frames(pages) {
+                return Some(VirtAddr::new(virt_addr));
+            }
+        }
+        None
+    }
+
+    /// deallocates a contiguous block of frames at the given virtual address
+    /// # Safety
+    /// The caller must ensure that the address was allocated by this allocator and is not in use.
+    pub unsafe fn deallocate_pages(&mut self, virt_addr: VirtAddr, pages: usize) {
+        assert!(pages.is_power_of_two(), "Number of pages must be a power of two");
+        let addr = virt_addr.as_u64() as usize;
+        
+        for allocator in self.allocators[..self.count].iter_mut().flatten() {
+            if addr >= allocator.virt_start && addr < allocator.virt_end {
+                unsafe { allocator.deallocate_contiguous_frames(virt_addr.as_u64(), pages) };
+                return;
+            }
+        }
+        panic!("Address {:#x} not managed by any allocator", addr);
     }
 }
 
