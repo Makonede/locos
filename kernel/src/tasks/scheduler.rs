@@ -2,9 +2,11 @@ use core::{arch::naked_asm, ptr::NonNull};
 
 use alloc::collections::vec_deque::VecDeque;
 use spin::Mutex;
-use x86_64::{registers::{
+use x86_64::{instructions::interrupts::{self, software_interrupt}, registers::{
     control::Cr3, rflags::{self}, segmentation::{Segment, CS, SS}
 }, structures::paging::PhysFrame, PhysAddr};
+
+use crate::{interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR};
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 
@@ -15,8 +17,11 @@ pub const KSTACK_SIZE: u8 = 4;
 /// Each kernel task has a stack size of KSTACK_SIZE - 1, for a guard page
 ///
 /// task should be a pointer to the function to run
-pub fn create_kernel_task(task: NonNull<()>) {
-    let scheduler = TASK_SCHEDULER.lock();
+pub fn kcreate_task(task: NonNull<()>) {
+    let mut stack_allocator = STACK_ALLOCATOR.lock();
+    let stack_start = stack_allocator.get_stack();
+
+    let mut scheduler = TASK_SCHEDULER.lock();
     let task = ProcessControlBlock {
         task_type: TaskType::Kernel,
         regs: TaskRegisters {
@@ -39,16 +44,33 @@ pub fn create_kernel_task(task: NonNull<()>) {
             interrupt_rip: task.as_ptr() as u64,
             interrupt_cs: CS::get_reg().0 as u64,
             interrupt_rflags: rflags::read_raw(),
-            interrupt_rsp: todo!(),
+            interrupt_rsp: stack_start.as_ptr() as u64,
             interrupt_ss: SS::get_reg().0 as u64,
         },
         state: TaskState::Ready,
+        stack_start,
         cr3: Cr3::read().0,
     };
     scheduler.task_list.push_back(task);
 }
 
+/// Exits a task
+/// 
+/// should be called at the end of every running kernel task when it wants to terminate
+#[inline]
+pub fn kexit_task() -> ! {
+    interrupts::disable();
+    {
+        let mut scheduler = TASK_SCHEDULER.lock();
+        let current_task = scheduler.task_list.front_mut().unwrap();
+        current_task.state = TaskState::Terminated;
+    }
+    interrupts::enable();
 
+    unsafe {
+        core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR, options(noreturn));
+    }
+}
 
 struct TaskScheduler {
     task_list: VecDeque<ProcessControlBlock>,
@@ -71,6 +93,7 @@ struct ProcessControlBlock {
     pub task_type: TaskType,
     pub regs: TaskRegisters,
     pub state: TaskState,
+    pub stack_start: NonNull<()>,
     /// page table for process
     pub cr3: PhysFrame,
 }
@@ -122,9 +145,12 @@ struct TaskRegisters {
 }
 
 /// switch to a task
+/// 
+/// # Safety
+/// what do you think might be unsafe about this
 #[unsafe(naked)]
 #[unsafe(no_mangle)]
-unsafe extern "x86-interrupt" fn schedule() {
+pub unsafe extern "x86-interrupt" fn schedule() {
     naked_asm!(
         "push rax",
         "push rbx",
@@ -179,10 +205,12 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
 
     // save current task context
     let mut head = scheduler.task_list.pop_front().unwrap();
+    head.state = TaskState::Ready;
     head.regs = unsafe { *current_task_context };
     scheduler.task_list.push_back(head);
 
     // run front task
-    let next_task = scheduler.task_list.front().unwrap();
+    let next_task = scheduler.task_list.front_mut().unwrap();
+    next_task.state = TaskState::Running;
     unsafe { *current_task_context = next_task.regs };
 }

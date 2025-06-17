@@ -10,13 +10,7 @@ use crate::{
     debug, info, memory::{FRAME_ALLOCATOR, PAGE_TABLE}, tasks::scheduler::KSTACK_SIZE
 };
 
-static STACK_ALLOCATOR: Mutex<Option<KernelSlabAlloc>> = Mutex::new(Some(KernelSlabAlloc::new()));
-
-pub fn init_kernel_stack_allocator() {
-    let mut allocator = STACK_ALLOCATOR.lock();
-    *allocator = Some(KernelSlabAlloc::new());
-    info!("Kernel stack allocator initialized at {:#x}", KERNEL_TASKS_START);
-}
+pub static STACK_ALLOCATOR: Mutex<KernelSlabAlloc> = Mutex::new(KernelSlabAlloc::new());
 
 /// Start address for kernel task stacks
 const KERNEL_TASKS_START: u64 = 0xFFFF_F300_0000_0000;
