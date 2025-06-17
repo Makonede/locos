@@ -1,13 +1,22 @@
 use core::ptr::NonNull;
 
+use spin::Mutex;
 use x86_64::{
-    structures::paging::{frame, FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB}, VirtAddr
+    VirtAddr,
+    structures::paging::{FrameAllocator, FrameDeallocator, Mapper, Page, PageTableFlags, Size4KiB},
 };
 
 use crate::{
-    memory::{FRAME_ALLOCATOR, PAGE_TABLE},
-    tasks::scheduler::KSTACK_SIZE,
+    debug, info, memory::{FRAME_ALLOCATOR, PAGE_TABLE}, tasks::scheduler::KSTACK_SIZE
 };
+
+static STACK_ALLOCATOR: Mutex<Option<KernelSlabAlloc>> = Mutex::new(Some(KernelSlabAlloc::new()));
+
+pub fn init_kernel_stack_allocator() {
+    let mut allocator = STACK_ALLOCATOR.lock();
+    *allocator = Some(KernelSlabAlloc::new());
+    info!("Kernel stack allocator initialized at {:#x}", KERNEL_TASKS_START);
+}
 
 /// Start address for kernel task stacks
 const KERNEL_TASKS_START: u64 = 0xFFFF_F300_0000_0000;
@@ -17,7 +26,6 @@ const KERNEL_TASKS_START: u64 = 0xFFFF_F300_0000_0000;
 /// supports max of 128 kernel tasks. Starts at KERNEL_TASKS_START
 pub struct KernelSlabAlloc {
     block_bitmap: u128,
-    block_mapped: u128,
 }
 
 impl Default for KernelSlabAlloc {
@@ -27,53 +35,77 @@ impl Default for KernelSlabAlloc {
 }
 
 impl KernelSlabAlloc {
-    pub fn new() -> Self {
-        KernelSlabAlloc {
-            block_bitmap: 0,
-            block_mapped: 0,
-        }
+    pub const fn new() -> Self {
+        KernelSlabAlloc { block_bitmap: 0 }
     }
 
     /// allocate a stack and guard page
-    /// 
+    ///
     /// returns a pointer to the stack top (highest usable address)
     pub fn get_stack(&mut self) -> NonNull<()> {
         let block_index = self.block_bitmap.trailing_ones();
-        
-        if block_index >= 128 {
-            panic!("Maximum number of kernel tasks exceeded");
-        }
-        
+
+        assert!(block_index < 128, "No free kernel task blocks available");
+
         let block_start = KERNEL_TASKS_START + (block_index as u64 * KSTACK_SIZE as u64 * 0x1000);
-        
-        if self.block_mapped & (1 << block_index) == 0 {
-            // block not mapped yet
-            let mut page_table_guard = PAGE_TABLE.lock();
-            let page_table_lock = page_table_guard.as_mut().unwrap();
-            
-            // Map stack pages (skip the first page as guard page)
-            for page_addr in block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000) {
-                unsafe {
-                    page_table_lock.map_to(
+
+        let mut page_table_guard = PAGE_TABLE.lock();
+        let page_table_lock = page_table_guard.as_mut().unwrap();
+
+        // Map stack pages (skip the first page as guard page)
+        for page_addr in block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000) {
+            unsafe {
+                page_table_lock
+                    .map_to(
                         Page::containing_address(VirtAddr::new(page_addr)),
-                        FRAME_ALLOCATOR.lock().as_mut().unwrap().allocate_frame().expect("Failed to allocate frame"),
+                        FRAME_ALLOCATOR
+                            .lock()
+                            .as_mut()
+                            .unwrap()
+                            .allocate_frame()
+                            .expect("Failed to allocate frame"),
                         PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
                         FRAME_ALLOCATOR.lock().as_mut().unwrap(),
-                    ).expect("Failed to map page").flush();
-                }
+                    )
+                    .expect("Failed to map page")
+                    .flush();
             }
-            
-            self.block_mapped |= 1 << block_index;
         }
-        
+
         self.block_bitmap |= 1 << block_index;
-        
-        let stack_top = block_start + (KSTACK_SIZE as u64 * 0x1000);
+
+        let stack_top = block_start + (KSTACK_SIZE as u64 * 0x1000) - 1;
+        debug!("Allocated stack at {:#x}", stack_top);
         NonNull::new(stack_top as *mut ()).unwrap()
     }
 
     /// deallocate a stack and guard page
-    pub fn return_stack(stack_start: NonNull<()>) {
-        todo!()
+    pub fn return_stack(&mut self, stack_top: NonNull<()>) {
+        let block_start = (stack_top.as_ptr() as u64 + 1) - (KSTACK_SIZE as u64 * 0x1000);
+        let block_index = (block_start - KERNEL_TASKS_START) / (KSTACK_SIZE as u64 * 0x1000);
+
+        assert!(block_index < 128 && (self.block_bitmap & (1 << block_index)) != 0);
+
+        let mut page_table = PAGE_TABLE.lock();
+        let mapper = page_table.as_mut().unwrap();
+
+        // Unmap stack pages (skip guard page at offset 0)
+        for page_addr in block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000) {
+            unsafe {
+                if let Ok((frame, flush)) =
+                    mapper.unmap(Page::<Size4KiB>::containing_address(VirtAddr::new(page_addr)))
+                {
+                    flush.flush();
+                    FRAME_ALLOCATOR
+                        .lock()
+                        .as_mut()
+                        .unwrap()
+                        .deallocate_frame(frame);
+                }
+            }
+        }
+
+        debug!("Deallocated stack at {:#x}", block_start);
+        self.block_bitmap &= !(1 << block_index);
     }
 }
