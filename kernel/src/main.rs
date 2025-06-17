@@ -30,20 +30,21 @@ extern crate alloc;
 
 use core::{arch::asm, panic::PanicInfo};
 
+use alloc::vec::Vec;
 use gdt::init_gdt;
 use interrupts::{init_idt, setup_apic};
 use limine::{
-    BaseRevision,
-    memory_map::EntryType,
-    request::{
+    memory_map::EntryType, request::{
         FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
-        RsdpRequest,
-    },
+        RsdpRequest, StackSizeRequest,
+    }, BaseRevision
 };
-use memory::{init_frame_allocator, init_heap, init_page_allocator, paging};
+use memory::{init_frame_allocator, init_heap, init_page_allocator, paging::{self, fill_page_list}};
 use meta::print_welcome;
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
+
+pub const STACK_SIZE: u64 = 0x100000;
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kernel_main() -> ! {
@@ -61,6 +62,16 @@ unsafe extern "C" fn kernel_main() -> ! {
         .expect("Hhdm request failed")
         .offset();
 
+    for entry in memory_regions {
+        debug!(
+            "Memory region: base = {:#x} - {:#x}, usable = {:?}",
+            entry.base + physical_memory_offset, entry.base + physical_memory_offset + entry.length, entry.entry_type == EntryType::USABLE,
+        );
+    }
+
+    debug!("Physical memory offset: {:#x}", physical_memory_offset);
+    unsafe { fill_page_list(memory_regions, physical_memory_offset as usize) };
+    debug!("Filling page list done");
     unsafe { init_frame_allocator(memory_regions, physical_memory_offset) };
 
     unsafe { paging::init(VirtAddr::new(physical_memory_offset)) };
@@ -76,10 +87,17 @@ unsafe extern "C" fn kernel_main() -> ! {
         .map(|entry| entry.length)
         .sum::<u64>();
 
+    let usable_regions = memory_regions
+        .iter()
+        .filter(|entry| entry.entry_type == EntryType::USABLE)
+        .map(|entry| entry.length)
+        .collect::<Vec<_>>();
+
     debug!(
-        "Total usable memory: {} bytes ({:.2} GiB)",
+        "Total usable memory: {} bytes ({:.2} GiB) spread over {:?} regions",
         usable_regions_sum,
-        usable_regions_sum as f64 / (1024.0 * 1024.0 * 1024.0)
+        usable_regions_sum as f64 / (1024.0 * 1024.0 * 1024.0),
+        usable_regions,
     );
     init_page_allocator(usable_regions_sum);
 
@@ -116,6 +134,10 @@ unsafe extern "C" fn kernel_main() -> ! {
 #[used]
 #[unsafe(link_section = ".requests")]
 pub static BASE_REVISION: BaseRevision = BaseRevision::new();
+
+#[used]
+#[unsafe(link_section = ".requests")]
+static STACK_SIZE_REQUEST: StackSizeRequest = StackSizeRequest::new().with_size(STACK_SIZE);
 
 #[used]
 #[unsafe(link_section = ".requests")]
