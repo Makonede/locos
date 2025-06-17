@@ -1,4 +1,4 @@
-use crate::{error, info, warn};
+use crate::{error, info, tasks::scheduler::schedule, warn};
 use acpi::{
     AcpiHandler, AcpiTables, InterruptModel,
     handler::PhysicalMapping,
@@ -33,7 +33,7 @@ const X2APIC_EOI_MSR: u32 = 0x80B;
 const IOAPICS_VIRTUAL_START: u64 = 0xFFFF_F000_0000_0000;
 const XAPIC_VIRTUAL_START: u64 = 0xFFFF_F100_0000_0000;
 const ACPI_MAPPINGS_START: u64 = 0xFFFF_F200_0000_0000;
-const LAPIC_TIMER_VECTOR: u8 = 0x30;
+pub const LAPIC_TIMER_VECTOR: u8 = 0x30;
 const LAPIC_ERROR_VECTOR: u8 = 0x31;
 const LAPIC_SPURIOUS_VECTOR: u8 = 0xFF;
 const IOAPIC_TIMER_VECTOR: u8 = 0x20;
@@ -44,12 +44,6 @@ const TIMER_RELOAD: u16 = (1193182u32 / 20) as u16;
 ///
 /// Acknowledges the interrupt by writing to the EOI MSR.
 extern "x86-interrupt" fn ioapic_timer_handler(_stack_frame: InterruptStackFrame) {
-    unsafe {
-        Msr::new(X2APIC_EOI_MSR).write(0);
-    };
-}
-
-extern "x86-interrupt" fn lapic_timer_handler(_stack_frame: InterruptStackFrame) {
     unsafe {
         Msr::new(X2APIC_EOI_MSR).write(0);
     };
@@ -106,7 +100,7 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
     let mut final_lapic = lapic.build().unwrap();
 
     unsafe {
-        (&mut (*IDT.as_mut_ptr()))[LAPIC_TIMER_VECTOR].set_handler_fn(lapic_timer_handler);
+        (&mut (*IDT.as_mut_ptr()))[LAPIC_TIMER_VECTOR].set_handler_addr(VirtAddr::new(schedule as usize as u64));
         (&mut (*IDT.as_mut_ptr()))[LAPIC_ERROR_VECTOR].set_handler_fn(lapic_error_handler);
         (&mut (*IDT.as_mut_ptr()))[LAPIC_SPURIOUS_VECTOR].set_handler_fn(spurious_handler);
     }
