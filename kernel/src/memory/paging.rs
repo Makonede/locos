@@ -305,6 +305,7 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
 
 impl <const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
     /// returns a virtual address the start of a contiguous block of frames
+    #[inline]
     pub fn allocate_pages(&mut self, pages: usize) -> Option<VirtAddr> {
         assert!(pages.is_power_of_two(), "Number of pages must be a power of two");
 
@@ -319,6 +320,7 @@ impl <const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
     /// deallocates a contiguous block of frames at the given virtual address
     /// # Safety
     /// The caller must ensure that the address was allocated by this allocator and is not in use.
+    #[inline]
     pub unsafe fn deallocate_pages(&mut self, virt_addr: VirtAddr, pages: usize) {
         assert!(pages.is_power_of_two(), "Number of pages must be a power of two");
         let addr = virt_addr.as_u64() as usize;
@@ -331,33 +333,38 @@ impl <const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
         }
         panic!("Address {:#x} not managed by any allocator", addr);
     }
+
+    /// allocates a physical frame
+    pub fn allocate_frames(&mut self, frames: usize) -> Option<PhysAddr> {
+        self.allocate_pages(frames).map(|virt_addr| {
+            let phys_addr = virt_addr.as_u64() - self.hddm_offset;
+            PhysAddr::new(phys_addr)
+        })
+    }
+
+    /// deallocates a physical frame
+    ///
+    /// # Safety
+    /// The caller must ensure that the physical address was allocated by this allocator and is not in use.
+    #[inline]
+    pub unsafe fn deallocate_frames(&mut self, phys_addr: PhysAddr, frames: usize) {
+        let virt_addr = VirtAddr::new(phys_addr.as_u64() + self.hddm_offset);
+        unsafe { self.deallocate_pages(virt_addr, frames) };
+    }
 }
 
 unsafe impl<const N: usize, const L: usize> FrameAllocator<Size4KiB> for FrameBuddyAllocatorForest<N, L> {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        for allocator in self.allocators[..self.count].iter_mut().flatten() {
-            if let Some(virt_addr) = allocator.allocate_contiguous_frames(1) {
-                let phys_addr = virt_addr - self.hddm_offset;
-                return Some(PhysFrame::containing_address(PhysAddr::new(phys_addr)));
-            }
-        }
-        None
+        self.allocate_frames(1).map(|phys_addr| {
+            PhysFrame::containing_address(phys_addr)
+        })
     }
 }
 
 impl<const N: usize, const L: usize> FrameDeallocator<Size4KiB> for FrameBuddyAllocatorForest<N, L> {
     unsafe fn deallocate_frame(&mut self, frame: PhysFrame) {
         let phys_addr = frame.start_address().as_u64();
-        let virt_addr = phys_addr + self.hddm_offset;
-        let addr = virt_addr as usize;
-        
-        for allocator in self.allocators[..self.count].iter_mut().flatten() {
-            if addr >= allocator.virt_start && addr < allocator.virt_end {
-                unsafe { allocator.deallocate_contiguous_frames(virt_addr, 1) };
-                return;
-            }
-        }
-        panic!("Frame {:#x} not managed by any allocator", phys_addr);
+        self.deallocate_frames(PhysAddr::new(phys_addr), 1);
     }
 }
 

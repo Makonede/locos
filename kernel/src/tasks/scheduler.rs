@@ -9,7 +9,7 @@ use x86_64::{registers::{
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 
 /// stack size of kernel task in pages. Must be power of 2
-const KSTACK_SIZE: u8 = 4;
+pub const KSTACK_SIZE: u8 = 4;
 
 /// adds a new kernel task to the scheduler
 /// Each kernel task has a stack size of KSTACK_SIZE - 1, for a guard page
