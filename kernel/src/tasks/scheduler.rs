@@ -6,7 +6,7 @@ use x86_64::{instructions::interrupts::{self, software_interrupt}, registers::{
     control::Cr3, rflags::{self}, segmentation::{Segment, CS, SS}
 }, structures::paging::PhysFrame, PhysAddr};
 
-use crate::{interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR};
+use crate::{debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR};
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 
@@ -17,7 +17,7 @@ pub const KSTACK_SIZE: u8 = 4;
 /// Each kernel task has a stack size of KSTACK_SIZE - 1, for a guard page
 ///
 /// task should be a pointer to the function to run
-pub fn kcreate_task(task: NonNull<()>) {
+pub fn kcreate_task(task: fn() -> !) {
     let mut stack_allocator = STACK_ALLOCATOR.lock();
     let stack_start = stack_allocator.get_stack();
 
@@ -41,7 +41,7 @@ pub fn kcreate_task(task: NonNull<()>) {
             r14: 0,
             r15: 0,
 
-            interrupt_rip: task.as_ptr() as u64,
+            interrupt_rip: task as usize as u64,
             interrupt_cs: CS::get_reg().0 as u64,
             interrupt_rflags: rflags::read_raw(),
             interrupt_rsp: stack_start.as_ptr() as u64,
@@ -51,6 +51,7 @@ pub fn kcreate_task(task: NonNull<()>) {
         stack_start,
         cr3: Cr3::read().0,
     };
+    info!("created task");
     scheduler.task_list.push_back(task);
 }
 
