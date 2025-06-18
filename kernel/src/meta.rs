@@ -1,4 +1,4 @@
-use crate::{print, println};
+use crate::{print, println, tasks::scheduler::kexit_task};
 
 const WELCOME: &str = r"___       ________  ________  ________  ________      
 |\  \     |\   __  \|\   ____\|\   __  \|\   ____\     
@@ -13,7 +13,9 @@ const WELCOME: &str = r"___       ________  ________  ________  ________
 const VERSION: &str = "v0.1.0";
 
 /// Prints the welcome message to the console.
-pub fn print_welcome() {
+pub fn tprint_welcome() -> ! {
     print!("\x1B[2J");
     println!("{}{}", WELCOME, VERSION);
+
+    kexit_task();
 }

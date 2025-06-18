@@ -39,25 +39,31 @@ impl KernelSlabAlloc {
     pub fn get_stack(&mut self) -> NonNull<()> {
         let block_index = self.block_bitmap.trailing_ones();
 
+        debug!("block index is {}", block_index);
+
         assert!(block_index < 128, "No free kernel task blocks available");
 
         let block_start = KERNEL_TASKS_START + (block_index as u64 * KSTACK_SIZE as u64 * 0x1000);
+
+        debug!("block start is {:#X}", block_start);
 
         let mut page_table_guard = PAGE_TABLE.lock();
         let page_table_lock = page_table_guard.as_mut().unwrap();
 
         // Map stack pages (skip the first page as guard page)
-        for page_addr in block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000) {
+        for page_addr in (block_start + 0x1000..=block_start + (KSTACK_SIZE as u64 * 0x1000)).step_by(0x1000) {
             unsafe {
+                debug!("mapping page at {:#X}", page_addr);
+                let frame = FRAME_ALLOCATOR
+                    .lock()
+                    .as_mut()
+                    .unwrap()
+                    .allocate_frame()
+                    .expect("failed to allocate frame");
                 page_table_lock
                     .map_to(
                         Page::containing_address(VirtAddr::new(page_addr)),
-                        FRAME_ALLOCATOR
-                            .lock()
-                            .as_mut()
-                            .unwrap()
-                            .allocate_frame()
-                            .expect("Failed to allocate frame"),
+                        frame,
                         PageTableFlags::PRESENT | PageTableFlags::WRITABLE,
                         FRAME_ALLOCATOR.lock().as_mut().unwrap(),
                     )
@@ -84,7 +90,7 @@ impl KernelSlabAlloc {
         let mapper = page_table.as_mut().unwrap();
 
         // Unmap stack pages (skip guard page at offset 0)
-        for page_addr in block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000) {
+        for page_addr in (block_start + 0x1000..=block_start + (KSTACK_SIZE as u64 * 0x1000)).step_by(0x1000) {
             unsafe {
                 if let Ok((frame, flush)) =
                     mapper.unmap(Page::<Size4KiB>::containing_address(VirtAddr::new(page_addr)))

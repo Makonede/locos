@@ -28,7 +28,7 @@ pub mod tasks;
 
 extern crate alloc;
 
-use core::{arch::asm, panic::PanicInfo};
+use core::{arch::asm, panic::PanicInfo, ptr::NonNull};
 
 use alloc::vec::Vec;
 use gdt::init_gdt;
@@ -40,9 +40,11 @@ use limine::{
     }, BaseRevision
 };
 use memory::{init_frame_allocator, init_heap, init_page_allocator, paging::{self, fill_page_list}};
-use meta::print_welcome;
+use meta::tprint_welcome;
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
+
+use crate::tasks::scheduler::kcreate_task;
 
 pub const STACK_SIZE: u64 = 0x100000;
 
@@ -124,10 +126,12 @@ unsafe extern "C" fn kernel_main() -> ! {
         .address();
 
     unsafe { setup_apic(rsdp_addr) };
+    
+    info!("creating task");
+    kcreate_task(tprint_welcome);
+
     x86_64::instructions::interrupts::enable();
-
-    print_welcome();
-
+    
     hcf();
 }
 
