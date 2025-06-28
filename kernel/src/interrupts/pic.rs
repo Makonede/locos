@@ -19,15 +19,17 @@ fn init_and_remap_pics() {
     unsafe {
         let mut master_port = Port::new(PIC1_COMMAND);
         master_port.write(0x11u8);
-        master_port.write(PIC1_OFFSET); // Remap offset to 32
-        master_port.write(0x04); // Tell PIC1 that there is slave PIC
-        master_port.write(0x01);
+        let mut master_data_port = Port::new(PIC1_DATA);
+        master_data_port.write(PIC1_OFFSET); // Remap offset to 32
+        master_data_port.write(0x04); // Tell PIC1 that there is slave PIC
+        master_data_port.write(0x01);
 
         let mut slave_port = Port::new(PIC2_COMMAND);
         slave_port.write(0x11u8);
-        slave_port.write(PIC2_OFFSET); // Remap offset to 40
-        slave_port.write(0x02); // Tell PIC2 its cascade identity
-        slave_port.write(0x01);
+        let mut slave_data_port = Port::new(PIC2_DATA);
+        slave_data_port.write(PIC2_OFFSET); // Remap offset to 40
+        slave_data_port.write(0x02); // Tell PIC2 its cascade identity
+        slave_data_port.write(0x01);
     }
 }
 
