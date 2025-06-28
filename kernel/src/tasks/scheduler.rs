@@ -2,9 +2,9 @@ use core::{arch::naked_asm, ptr::NonNull};
 
 use alloc::collections::vec_deque::VecDeque;
 use spin::Mutex;
-use x86_64::{instructions::interrupts::{self, software_interrupt}, registers::{
+use x86_64::{instructions::interrupts::{self}, registers::{
     control::Cr3, rflags::{self}, segmentation::{Segment, CS, SS}
-}, structures::paging::PhysFrame, PhysAddr};
+}, structures::paging::PhysFrame};
 
 use crate::{debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR, trace};
 
@@ -17,7 +17,7 @@ pub const KSTACK_SIZE: u8 = 4;
 /// 
 /// this task should never finish
 pub fn kinit_multitasking() {
-    let mut current_regs = TaskRegisters {
+    let current_regs = TaskRegisters {
         rax: 0,
         rbx: 0,
         rcx: 0,

@@ -28,7 +28,7 @@ pub mod tasks;
 
 extern crate alloc;
 
-use core::{arch::asm, panic::PanicInfo, ptr::NonNull};
+use core::{arch::asm, panic::PanicInfo};
 
 use alloc::vec::Vec;
 use gdt::init_gdt;
@@ -64,6 +64,7 @@ unsafe extern "C" fn kernel_main() -> ! {
         .expect("Hhdm request failed")
         .offset();
 
+    #[allow(unused_variables)]
     for entry in memory_regions {
         debug!(
             "Memory region: base = {:#x} - {:#x}, usable = {:?}",
@@ -89,6 +90,7 @@ unsafe extern "C" fn kernel_main() -> ! {
         .map(|entry| entry.length)
         .sum::<u64>();
 
+    #[allow(unused_variables)]
     let usable_regions = memory_regions
         .iter()
         .filter(|entry| entry.entry_type == EntryType::USABLE)

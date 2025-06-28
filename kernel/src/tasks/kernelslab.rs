@@ -7,7 +7,7 @@ use x86_64::{
 };
 
 use crate::{
-    debug, info, memory::{FRAME_ALLOCATOR, PAGE_TABLE}, tasks::scheduler::KSTACK_SIZE, trace
+    debug, memory::{FRAME_ALLOCATOR, PAGE_TABLE}, tasks::scheduler::KSTACK_SIZE, trace
 };
 
 pub static STACK_ALLOCATOR: Mutex<KernelSlabAlloc> = Mutex::new(KernelSlabAlloc::new());
