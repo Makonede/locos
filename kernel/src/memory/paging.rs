@@ -364,7 +364,7 @@ unsafe impl<const N: usize, const L: usize> FrameAllocator<Size4KiB> for FrameBu
 impl<const N: usize, const L: usize> FrameDeallocator<Size4KiB> for FrameBuddyAllocatorForest<N, L> {
     unsafe fn deallocate_frame(&mut self, frame: PhysFrame) {
         let phys_addr = frame.start_address().as_u64();
-        self.deallocate_frames(PhysAddr::new(phys_addr), 1);
+        unsafe { self.deallocate_frames(PhysAddr::new(phys_addr), 1) };
     }
 }
 
