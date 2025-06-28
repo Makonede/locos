@@ -1,4 +1,4 @@
-use crate::{print, println, tasks::scheduler::kexit_task};
+use crate::{print, println, serial_println, tasks::scheduler::kexit_task};
 
 const WELCOME: &str = r"___       ________  ________  ________  ________      
 |\  \     |\   __  \|\   ____\|\   __  \|\   ____\     
@@ -16,6 +16,8 @@ const VERSION: &str = "v0.1.0";
 pub fn tprint_welcome() -> ! {
     print!("\x1B[2J");
     println!("{}{}", WELCOME, VERSION);
+
+    serial_println!("welcome to LocOS {}", VERSION);
 
     kexit_task();
 }

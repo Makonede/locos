@@ -44,7 +44,7 @@ use meta::tprint_welcome;
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
 
-use crate::tasks::scheduler::kcreate_task;
+use crate::{interrupts::apic::LAPIC_TIMER_VECTOR, tasks::scheduler::{kcreate_task, kexit_task, kinit_multitasking}};
 
 pub const STACK_SIZE: u64 = 0x100000;
 
@@ -127,12 +127,24 @@ unsafe extern "C" fn kernel_main() -> ! {
 
     unsafe { setup_apic(rsdp_addr) };
     
-    info!("creating task");
-    kcreate_task(tprint_welcome);
+    kcreate_task(tprint_welcome, "print welcome message");
+    kcreate_task(print_stuff, "print stuff");
+    kinit_multitasking();
 
     x86_64::instructions::interrupts::enable();
-    
-    hcf();
+    unsafe {
+        core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR);
+    }
+
+    hcf(); 
+}
+
+pub fn print_stuff() -> ! {
+    for i in 0..100 {
+        info!("hello from kernel thread 2, iteration {}", i);
+    }
+
+    kexit_task();
 }
 
 #[used]

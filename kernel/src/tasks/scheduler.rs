@@ -6,18 +6,58 @@ use x86_64::{instructions::interrupts::{self, software_interrupt}, registers::{
     control::Cr3, rflags::{self}, segmentation::{Segment, CS, SS}
 }, structures::paging::PhysFrame, PhysAddr};
 
-use crate::{debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR};
+use crate::{debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR, trace};
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 
 /// stack size of kernel task in pages. Must be power of 2
 pub const KSTACK_SIZE: u8 = 4;
 
+/// adds the current kernel task to a pcb
+/// 
+/// this task should never finish
+pub fn kinit_multitasking() {
+    let mut current_regs = TaskRegisters {
+        rax: 0,
+        rbx: 0,
+        rcx: 0,
+        rdx: 0,
+        rsi: 0,
+        rdi: 0,
+        rbp: 0,
+        r8: 0,
+        r9: 0,
+        r10: 0,
+        r11: 0,
+        r12: 0,
+        r13: 0,
+        r14: 0,
+        r15: 0,
+        interrupt_rip: 0,
+        interrupt_cs: CS::get_reg().0 as u64,
+        interrupt_rflags: rflags::read_raw(),
+        interrupt_rsp: 0,
+        interrupt_ss: SS::get_reg().0 as u64,
+    };
+        
+    let mut scheduler = TASK_SCHEDULER.lock();
+    let current_task = ProcessControlBlock {
+        task_type: TaskType::Kernel,
+        regs: current_regs,
+        state: TaskState::Running,  // Mark as currently running
+        stack_start: NonNull::dangling(),  // Kernel uses its own stack
+        cr3: Cr3::read().0,
+    };
+    scheduler.task_list.push_front(current_task);
+    debug!("Added current kernel task to scheduler with RIP: {:#x}, RSP: {:#x}", 
+           current_regs.interrupt_rip, current_regs.interrupt_rsp);
+}
+
 /// adds a new kernel task to the scheduler
 /// Each kernel task has a stack size of KSTACK_SIZE - 1, for a guard page
 ///
 /// task should be a pointer to the function to run
-pub fn kcreate_task(task: fn() -> !) {
+pub fn kcreate_task(task_ptr: fn() -> !, name: &str) {
     let mut stack_allocator = STACK_ALLOCATOR.lock();
     let stack_start = stack_allocator.get_stack();
 
@@ -41,7 +81,7 @@ pub fn kcreate_task(task: fn() -> !) {
             r14: 0,
             r15: 0,
 
-            interrupt_rip: task as usize as u64,
+            interrupt_rip: task_ptr as usize as u64,
             interrupt_cs: CS::get_reg().0 as u64,
             interrupt_rflags: rflags::read_raw(),
             interrupt_rsp: stack_start.as_ptr() as u64,
@@ -51,8 +91,9 @@ pub fn kcreate_task(task: fn() -> !) {
         stack_start,
         cr3: Cr3::read().0,
     };
-    info!("created task");
     scheduler.task_list.push_back(task);
+    info!("created task {:?}", name);
+    trace!("created task {:?}", task);
 }
 
 /// Exits a task
@@ -200,18 +241,25 @@ pub unsafe extern "x86-interrupt" fn schedule() {
 unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
     let mut scheduler = TASK_SCHEDULER.lock();
 
-    if scheduler.task_list.front().unwrap().state == TaskState::Terminated {
-        scheduler.task_list.pop_front();
-    }
+    // save current task context first
+    let mut current_task = scheduler.task_list.pop_front().unwrap();
+    
+    if current_task.state == TaskState::Terminated {
+        trace!("task ended at {:#X}", current_task.regs.interrupt_rsp);
+    } else {
+        current_task.state = TaskState::Ready;
+        current_task.regs = unsafe { *current_task_context };
+        trace!("task registers: {:?}", current_task.regs);
+        scheduler.task_list.push_back(current_task);
+        trace!("task paused at {:#X}", current_task.regs.interrupt_rsp);
 
-    // save current task context
-    let mut head = scheduler.task_list.pop_front().unwrap();
-    head.state = TaskState::Ready;
-    head.regs = unsafe { *current_task_context };
-    scheduler.task_list.push_back(head);
+        trace!("{:#X}", scheduler.task_list.front_mut().unwrap().regs.interrupt_rsp);
+    }
 
     // run front task
     let next_task = scheduler.task_list.front_mut().unwrap();
+    trace!("task for next: {:?}", next_task);
+    trace!("next task at {:#X}", next_task.regs.interrupt_rsp);
     next_task.state = TaskState::Running;
     unsafe { *current_task_context = next_task.regs };
 }
