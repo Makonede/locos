@@ -23,6 +23,7 @@ pub mod interrupts;
 pub mod memory;
 pub mod meta;
 pub mod output;
+pub mod pci;
 pub mod serial;
 pub mod tasks;
 
@@ -128,9 +129,15 @@ unsafe extern "C" fn kernel_main() -> ! {
         .address();
 
     unsafe { setup_apic(rsdp_addr) };
-    
+
+    // Initialize PCIe subsystem
+    if let Err(e) = pci::init_pci(rsdp_addr) {
+        error!("Failed to initialize PCIe subsystem: {:?}", e);
+    }
+
     kcreate_task(tprint_welcome, "print welcome message");
-    kcreate_task(print_stuff, "print stuff");
+    //kcreate_task(print_stuff, "print stuff");
+    kcreate_task(test_pci, "test PCIe enumeration");
     kinit_multitasking();
 
     x86_64::instructions::interrupts::enable();
@@ -144,6 +151,55 @@ unsafe extern "C" fn kernel_main() -> ! {
 pub fn print_stuff() -> ! {
     for i in 0..100 {
         info!("hello from kernel thread 2, iteration {}", i);
+    }
+
+    kexit_task();
+}
+
+pub fn test_pci() -> ! {
+    info!("Testing PCIe device enumeration...");
+
+    if let Some(manager) = pci::PCI_MANAGER.lock().as_ref() {
+        info!("ECAM Regions mapped:");
+        for (i, region) in manager.ecam_regions.iter().enumerate() {
+            info!(
+                "  Region {}: buses {}-{}, phys={:#x}, virt={:#x}, size={}MB",
+                i,
+                region.start_bus,
+                region.end_bus,
+                region.base_address.as_u64(),
+                region.virtual_address.as_u64(),
+                region.mapping_size() >> 20
+            );
+        }
+
+        info!("Found {} PCIe devices:", manager.devices.len());
+
+        for (i, device) in manager.devices.iter().enumerate() {
+            info!("  Device {}: {}", i, device);
+
+            if device.supports_msix() {
+                info!("    - Supports MSI-X");
+            } else if device.supports_msi() {
+                info!("    - Supports MSI");
+            } else {
+                info!("    - Uses legacy interrupts");
+            }
+        }
+
+        // Find network devices
+        let network_devices = manager.get_devices_by_class(pci::config::device_classes::NETWORK);
+        info!("Found {} network devices", network_devices.len());
+
+        // Find storage devices
+        let storage_devices = manager.get_devices_by_class(pci::config::device_classes::MASS_STORAGE);
+        info!("Found {} storage devices", storage_devices.len());
+
+        // Show total memory usage
+        let total_ecam_size = pci::mcfg::calculate_total_ecam_size(&manager.ecam_regions);
+        info!("Total PCIe configuration space mapped: {} MB", total_ecam_size >> 20);
+    } else {
+        warn!("PCIe manager not initialized");
     }
 
     kexit_task();
