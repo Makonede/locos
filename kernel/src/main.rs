@@ -45,11 +45,18 @@ use limine::{
     }, BaseRevision
 };
 use memory::{init_frame_allocator, init_heap, init_page_allocator, paging::{self, fill_page_list}};
-use meta::tprint_welcome;
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
 
-use crate::{interrupts::apic::LAPIC_TIMER_VECTOR, tasks::scheduler::{kcreate_task, kexit_task, kinit_multitasking}};
+use crate::tasks::scheduler::kexit_task;
+
+#[cfg(not(test))]
+use meta::tprint_welcome;
+#[cfg(not(test))]
+use crate::{interrupts::apic::LAPIC_TIMER_VECTOR, tasks::scheduler::{kcreate_task, kinit_multitasking}};
+
+#[cfg(test)]
+use x86_64::instructions::port::Port;
 
 pub const STACK_SIZE: u64 = 0x100000;
 
@@ -139,20 +146,27 @@ unsafe extern "C" fn kernel_main() -> ! {
         error!("Failed to initialize PCIe subsystem: {:?}", e);
     }
 
-    kcreate_task(tprint_welcome, "print welcome message");
-    //kcreate_task(print_stuff, "print stuff");
-    kcreate_task(test_pci, "test PCIe enumeration");
-    kinit_multitasking();
-
-    x86_64::instructions::interrupts::enable();
-    unsafe {
-        core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR);
+    #[cfg(test)]
+    {
+        // Clear console and run tests before starting kernel tasks
+        print!("\x1B[2J\x1B[H"); // Clear screen and move cursor to top
+        test_main();
     }
 
-    #[cfg(test)]
-    test_main();
+    #[cfg(not(test))]
+    {
+        kcreate_task(tprint_welcome, "print welcome message");
+        //kcreate_task(print_stuff, "print stuff");
+        kcreate_task(test_pci, "test PCIe enumeration");
+        kinit_multitasking();
 
-    hcf(); 
+        x86_64::instructions::interrupts::enable();
+        unsafe {
+            core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR);
+        }
+    }
+
+    hcf();
 }
 
 pub fn print_stuff() -> ! {
@@ -243,9 +257,19 @@ static _START_MARKER: RequestsStartMarker = RequestsStartMarker::new();
 #[unsafe(link_section = ".requests_end_marker")]
 static _END_MARKER: RequestsEndMarker = RequestsEndMarker::new();
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
     error!("{}", info);
+    hcf();
+}
+
+#[cfg(test)]
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    serial_println!("[failed]");
+    serial_println!("Error: {}", info);
+    exit_qemu(QemuExitCode::Failed);
     hcf();
 }
 
@@ -259,18 +283,64 @@ fn hcf() -> ! {
 }
 
 
-#[cfg(test)]
-fn test_runner(tests: &[&dyn Fn()]) {
-    info!("Running {} tests", tests.len());
-    for test in tests {
-        test();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum QemuExitCode {
+    Success = 0x10,
+    Failed = 0x11,
+}
+
+pub fn exit_qemu(exit_code: QemuExitCode) {
+    use x86_64::instructions::port::Port;
+
+    unsafe {
+        let mut port = Port::new(0xf4);
+        port.write(exit_code as u32);
     }
+}
+
+pub trait Testable {
+    fn run(&self) -> ();
+}
+
+impl<T> Testable for T
+where
+    T: Fn(),
+{
+    fn run(&self) {
+        let test_name = core::any::type_name::<T>()
+            .split("::")
+            .last()
+            .unwrap_or("unknown_test");
+        serial_print!("{}...\t", test_name);
+        self();
+        serial_println!("[ok]");
+    }
+}
+
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Testable]) {
+    serial_print!("\x1b[2J\x1b[H");
+    serial_println!("Running {} tests", tests.len());
+    for test in tests {
+        test.run();
+    }
+    exit_qemu(QemuExitCode::Success);
 }
 
 #[test_case]
 fn trivial_assertion() {
-    info!("Running trivial assertion test");
     let x = 1;
     assert_eq!(1, x);
-    info!("[ok]");
+}
+
+#[test_case]
+fn test_basic_arithmetic() {
+    let a = 2;
+    let b = 2;
+    assert_eq!(a + b, 4);
+
+    let c = 10;
+    let d = 5;
+    assert_eq!(c - d, 5);
 }
