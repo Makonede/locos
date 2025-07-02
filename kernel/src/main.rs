@@ -18,6 +18,10 @@ You should have received a copy of the GNU General Public License along with loc
 #![no_std]
 #![no_main]
 #![feature(abi_x86_interrupt)]
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner)]
+#![reexport_test_harness_main = "test_main"]
+
 pub mod gdt;
 pub mod interrupts;
 pub mod memory;
@@ -145,6 +149,9 @@ unsafe extern "C" fn kernel_main() -> ! {
         core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR);
     }
 
+    #[cfg(test)]
+    test_main();
+
     hcf(); 
 }
 
@@ -249,4 +256,21 @@ fn hcf() -> ! {
             asm!("hlt");
         }
     }
+}
+
+
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Fn()]) {
+    info!("Running {} tests", tests.len());
+    for test in tests {
+        test();
+    }
+}
+
+#[test_case]
+fn trivial_assertion() {
+    info!("Running trivial assertion test");
+    let x = 1;
+    assert_eq!(1, x);
+    info!("[ok]");
 }

@@ -15,8 +15,6 @@ log-error = []
 [[bin]]
 name = 'kernel'
 path = "src/main.rs"
-test = false
-bench = false
 
 [dependencies]
 x2apic = "0.5.0"
