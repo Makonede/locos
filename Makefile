@@ -23,7 +23,7 @@ run: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME).iso
 
 .PHONY: test
 test: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME)-test.iso
-	qemu-system-x86_64 \
+	@qemu-system-x86_64 \
 		-M q35 \
 		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-x86_64.fd,readonly=on \
 		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-x86_64.fd \
@@ -33,10 +33,17 @@ test: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME)-test.iso
 		-display none \
 		-m 2G \
 		-no-reboot \
-		-no-shutdown \
 		-enable-kvm \
 		-smp 2 \
-		-cpu host,+x2apic;
+		-cpu host,+x2apic; \
+	EXIT_CODE=$$?; \
+	if [ $$EXIT_CODE -eq 33 ]; then \
+		echo "all tests passed!"; \
+		exit 0; \
+	else \
+		echo "not all tests passed :("; \
+		exit $$EXIT_CODE; \
+	fi
 
 
 ovmf/ovmf-code-x86_64.fd:
