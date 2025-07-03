@@ -19,7 +19,7 @@ jobs:
       run: sudo apt-get install -y xorriso
     
     - name: Install Rust nightly
-      uses: dtolnay/rust-toolchain@nightly
+      uses: dtolnay/rust-toolchain@nightly-2025-06-20
       with:
         targets: x86_64-unknown-none
         components: rust-src
@@ -43,7 +43,7 @@ jobs:
       run: sudo apt-get install -y xorriso
 
     - name: Install Rust nightly
-      uses: dtolnay/rust-toolchain@nightly
+      uses: dtolnay/rust-toolchain@nightly-2025-06-20
       with:
         targets: x86_64-unknown-none
         components: rust-src
