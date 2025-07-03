@@ -22,6 +22,7 @@ jobs:
       uses: dtolnay/rust-toolchain@nightly
       with:
         targets: x86_64-unknown-none
+        components: rust-src
         
     - name: Build kernel
       run: make
@@ -45,6 +46,7 @@ jobs:
       uses: dtolnay/rust-toolchain@nightly
       with:
         targets: x86_64-unknown-none
+        components: rust-src
 
     - name: run tests
       run: make test
