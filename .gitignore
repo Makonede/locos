@@ -5,6 +5,7 @@ build
 limine
 ovmf
 locos.iso
+locos-test.iso
 
 
 # Added by cargo
