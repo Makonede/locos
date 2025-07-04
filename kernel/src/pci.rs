@@ -14,6 +14,9 @@ pub mod device;
 pub mod mcfg;
 pub mod msi;
 
+#[cfg(test)]
+pub mod tests;
+
 use alloc::vec::Vec;
 use spin::Mutex;
 

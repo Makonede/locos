@@ -20,7 +20,7 @@ endif
 # Default build target
 .PHONY: all
 all:
-	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE)
+	RUSTFLAGS="-C relocation-model=static" cargo build --target $(RUST_TARGET) --profile $(RUST_PROFILE) --features log-info
 	mkdir -p $(BUILD_DIR) && cp target/$(RUST_TARGET)/$(RUST_PROFILE_SUBDIR)/kernel $(BUILD_DIR)/$(OUTPUT)
 
 # Test build target

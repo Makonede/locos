@@ -129,7 +129,7 @@ impl TaskScheduler {
 }
 
 /// Stores information about a running process
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(C)]
 struct ProcessControlBlock {
     pub task_type: TaskType,
@@ -159,7 +159,7 @@ enum TaskType {
 }
 
 // Stores task registers in reverse order of stack push during context switch
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(C)]
 struct TaskRegisters {
     r15: u64,
@@ -258,6 +258,15 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
 
     // run front task
     let next_task = scheduler.task_list.front_mut().unwrap();
+    
+    #[cfg(test)]
+    {
+        if current_task == *next_task {
+            use crate::testing::{exit_qemu, QemuExitCode};
+            exit_qemu(QemuExitCode::Success);
+        }
+    }
+
     trace!("task for next: {:?}", next_task);
     trace!("next task at {:#X}", next_task.regs.interrupt_rsp);
     next_task.state = TaskState::Running;

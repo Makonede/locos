@@ -1,6 +1,7 @@
 pub mod freelist;
 pub mod alloc;
 pub mod paging;
+pub mod tests;
 
 pub use alloc::{init_heap, init_page_allocator};
 pub use paging::FrameBuddyAllocatorForest;

@@ -19,7 +19,7 @@ You should have received a copy of the GNU General Public License along with loc
 #![no_main]
 #![feature(abi_x86_interrupt)]
 #![feature(custom_test_frameworks)]
-#![test_runner(crate::test_runner)]
+#![test_runner(crate::testing::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
 pub mod gdt;
@@ -30,6 +30,7 @@ pub mod output;
 pub mod pci;
 pub mod serial;
 pub mod tasks;
+pub mod testing;
 
 extern crate alloc;
 
@@ -157,7 +158,6 @@ unsafe extern "C" fn kernel_main() -> ! {
     {
         kcreate_task(tprint_welcome, "print welcome message");
         //kcreate_task(print_stuff, "print stuff");
-        kcreate_task(test_pci, "test PCIe enumeration");
         kinit_multitasking();
 
         x86_64::instructions::interrupts::enable();
@@ -177,54 +177,7 @@ pub fn print_stuff() -> ! {
     kexit_task();
 }
 
-pub fn test_pci() -> ! {
-    info!("Testing PCIe device enumeration...");
 
-    if let Some(manager) = pci::PCI_MANAGER.lock().as_ref() {
-        info!("ECAM Regions mapped:");
-        for (i, region) in manager.ecam_regions.iter().enumerate() {
-            info!(
-                "  Region {}: buses {}-{}, phys={:#x}, virt={:#x}, size={}MB",
-                i,
-                region.start_bus,
-                region.end_bus,
-                region.base_address.as_u64(),
-                region.virtual_address.as_u64(),
-                region.mapping_size() >> 20
-            );
-        }
-
-        info!("Found {} PCIe devices:", manager.devices.len());
-
-        for (i, device) in manager.devices.iter().enumerate() {
-            info!("  Device {}: {}", i, device);
-
-            if device.supports_msix() {
-                info!("    - Supports MSI-X");
-            } else if device.supports_msi() {
-                info!("    - Supports MSI");
-            } else {
-                info!("    - Uses legacy interrupts");
-            }
-        }
-
-        // Find network devices
-        let network_devices = manager.get_devices_by_class(pci::config::device_classes::NETWORK);
-        info!("Found {} network devices", network_devices.len());
-
-        // Find storage devices
-        let storage_devices = manager.get_devices_by_class(pci::config::device_classes::MASS_STORAGE);
-        info!("Found {} storage devices", storage_devices.len());
-
-        // Show total memory usage
-        let total_ecam_size = pci::mcfg::calculate_total_ecam_size(&manager.ecam_regions);
-        info!("Total PCIe configuration space mapped: {} MB", total_ecam_size >> 20);
-    } else {
-        warn!("PCIe manager not initialized");
-    }
-
-    kexit_task();
-}
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -267,6 +220,8 @@ fn panic(info: &PanicInfo) -> ! {
 #[cfg(test)]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    use crate::testing::{exit_qemu, QemuExitCode};
+
     serial_println!("[failed]");
     serial_println!("Error: {}", info);
     exit_qemu(QemuExitCode::Failed);
@@ -282,51 +237,6 @@ fn hcf() -> ! {
     }
 }
 
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum QemuExitCode {
-    Success = 0x10,
-    Failed = 0x11,
-}
-
-pub fn exit_qemu(exit_code: QemuExitCode) {
-    use x86_64::instructions::port::Port;
-
-    unsafe {
-        let mut port = Port::new(0xf4);
-        port.write(exit_code as u32);
-    }
-}
-
-pub trait Testable {
-    fn run(&self) -> ();
-}
-
-impl<T> Testable for T
-where
-    T: Fn(),
-{
-    fn run(&self) {
-        let test_name = core::any::type_name::<T>()
-            .split("::")
-            .last()
-            .unwrap_or("unknown_test");
-        serial_print!("{}...\t", test_name);
-        self();
-        serial_println!("[ok]");
-    }
-}
-
-#[cfg(test)]
-fn test_runner(tests: &[&dyn Testable]) {
-    serial_print!("\x1b[2J\x1b[H");
-    serial_println!("Running {} tests", tests.len());
-    for test in tests {
-        test.run();
-    }
-    exit_qemu(QemuExitCode::Success);
-}
 
 #[test_case]
 fn trivial_assertion() {

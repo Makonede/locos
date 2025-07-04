@@ -5,7 +5,7 @@ edition = '2024'
 authors = ['Mako', 'JayAndJef']
 
 [features]
-default = ["log-info"]
+default = []
 log-trace = ["log-debug"]
 log-debug = ["log-info"]
 log-info = ["log-warn"]

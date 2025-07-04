@@ -1,0 +1,47 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[8;042;160t0[2J[01;01H[2J[01;01H[8;056;240t0[2J[01;01HBdsDxe: loading Boot0002 "UEFI QEMU DVD-ROM QM00005 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x2,0xFFFF,0x0)
+BdsDxe: starting Boot0002 "UEFI QEMU DVD-ROM QM00005 " from PciRoot(0x0)/Pci(0x1F,0x2)/Sata(0x2,0xFFFF,0x0)
+[2J[01;01H[01;01H[2J[01;01H[01;01H[32mINFO:[0m tss initialized
+[32mINFO:[0m gdt initialized
+[32mINFO:[0m idt initialized
+[32mINFO:[0m idt loaded
+[32mINFO:[0m frame allocator initialized
+[32mINFO:[0m page tables initialized
+[32mINFO:[0m heap initialized: Page[4KiB](0xffff880000000000) - Page[4KiB](0xffff880000fff000)
+[32mINFO:[0m Page allocator initialized: VirtAddr(
+    0xffff900000000000,
+) - VirtAddr(
+    0xffff900080000000,
+), size managed: 2 GiB
+[32mINFO:[0m flanterm initialized
+[32mINFO:[0m apic initialized with 1 IO APICs
+[32mINFO:[0m Initializing PCIe subsystem
+[32mINFO:[0m Found 1 ECAM regions
+[32mINFO:[0m Total ECAM mapping size: 256 MB
+[32mINFO:[0m Mapping entire ECAM region: phys=0xe0000000 -> virt=0xfffff40000000000, size=0x10000000 (65536 pages)
+[32mINFO:[0m Successfully mapped ECAM region: buses 0-255, 256 MB of config space
+[32mINFO:[0m All ECAM regions mapped successfully
+[32mINFO:[0m Discovered 6 PCIe devices
+[32mINFO:[0m PCIe subsystem initialized successfully
+[2J[HRunning 12 tests
+kernel::memory::tests::test_big_heap_type...	[ok]
+kernel::memory::tests::test_growing_vec...	[ok]
+kernel::memory::tests::test_lots_of_pointers...	[ok]
+kernel::memory::tests::test_simple_alloc...	[ok]
+kernel::output::tests::test_output...	[ok]
+kernel::pci::tests::test_device_classification...	[ok]
+kernel::pci::tests::test_device_enumeration...	[ok]
+kernel::pci::tests::test_ecam_regions_valid...	[ok]
+kernel::pci::tests::test_pci_manager_initialized...	[ok]
+kernel::tasks::testing::test_multitasking...	[32mINFO:[0m created task "do something"
+[32mINFO:[0m created task "do something else"
+[32mINFO:[0m created task "do something"
+[32mINFO:[0m created task "do something else"
+[32mINFO:[0m created task "do something"
+[32mINFO:[0m created task "do something else"
+[32mINFO:[0m created task "do something"
+[32mINFO:[0m created task "do something else"
+[32mINFO:[0m created task "do something"
+[32mINFO:[0m created task "do something else"
+[scheduled]
+kernel::test_basic_arithmetic...	[ok]
+kernel::trivial_assertion...	[ok]
