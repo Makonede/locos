@@ -247,42 +247,32 @@ impl MsiXInfo {
         use super::device::BarInfo;
 
         // Get the BAR that contains the MSI-X table
-        if let Some(table_bar_info) = self.device.bars.get(self.table_bar as usize) {
-            match table_bar_info {
-                BarInfo::Memory { address, .. } => {
-                    self.table_virtual_addr = Some(address.as_u64() + self.table_offset as u64);
-                    info!(
-                        "MSI-X table mapped at virtual address {:#x}",
-                        self.table_virtual_addr.unwrap()
-                    );
-                }
-                _ => {
-                    warn!("MSI-X table BAR is not a memory BAR");
-                    return Err(PciError::MsiXSetupFailed);
-                }
-            }
+        if let Some(super::device::BarInfo::Memory { address, .. }) = self.device.bars.get(self.table_bar as usize) {
+            self.table_virtual_addr = Some(address.as_u64() + self.table_offset as u64);
+            info!(
+                "MSI-X table mapped at virtual address {:#x}",
+                self.table_virtual_addr.unwrap()
+            );
         } else {
-            warn!("MSI-X table BAR index {} is invalid", self.table_bar);
+            warn!(
+                "MSI-X table BAR is not a memory BAR or index {} is invalid",
+                self.table_bar
+            );
             return Err(PciError::MsiXSetupFailed);
         }
 
         // Get the BAR that contains the PBA
-        if let Some(pba_bar_info) = self.device.bars.get(self.pba_bar as usize) {
-            match pba_bar_info {
-                BarInfo::Memory { address, .. } => {
-                    self.pba_virtual_addr = Some(address.as_u64() + self.pba_offset as u64);
-                    info!(
-                        "MSI-X PBA mapped at virtual address {:#x}",
-                        self.pba_virtual_addr.unwrap()
-                    );
-                }
-                _ => {
-                    warn!("MSI-X PBA BAR is not a memory BAR");
-                    return Err(PciError::MsiXSetupFailed);
-                }
-            }
+        if let Some(super::device::BarInfo::Memory { address, .. }) = self.device.bars.get(self.pba_bar as usize) {
+            self.pba_virtual_addr = Some(address.as_u64() + self.pba_offset as u64);
+            info!(
+                "MSI-X PBA mapped at virtual address {:#x}",
+                self.pba_virtual_addr.unwrap()
+            );
         } else {
-            warn!("MSI-X PBA BAR index {} is invalid", self.pba_bar);
+            warn!(
+                "MSI-X PBA BAR is not a memory BAR or index {} is invalid",
+                self.pba_bar
+            );
             return Err(PciError::MsiXSetupFailed);
         }
 
