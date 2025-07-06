@@ -36,7 +36,7 @@ extern crate alloc;
 
 use core::{arch::asm, panic::PanicInfo};
 
-use alloc::vec::Vec;
+use alloc::{vec::Vec, format};
 use gdt::init_gdt;
 use interrupts::{init_idt, setup_apic};
 use limine::{
@@ -143,9 +143,10 @@ unsafe extern "C" fn kernel_main() -> ! {
     unsafe { setup_apic(rsdp_addr) };
 
     // Initialize PCIe subsystem
-    if let Err(e) = pci::init_pci(rsdp_addr) {
-        error!("Failed to initialize PCIe subsystem: {:?}", e);
-    }
+    pci::init_pci(rsdp_addr).expect("failed to initialize PCIe subsystem");
+
+    // List all discovered PCIe devices
+    list_pcie_devices();
 
     #[cfg(test)]
     {
@@ -175,6 +176,131 @@ pub fn print_stuff() -> ! {
     }
 
     kexit_task();
+}
+
+/// List all discovered PCIe devices with detailed information
+fn list_pcie_devices() {
+    use pci::config::{device_classes, vendor_ids};
+
+    let pci_manager = pci::get_pci_manager();
+    let manager_lock = pci_manager.lock();
+
+    if let Some(manager) = manager_lock.as_ref() {
+        info!("=== PCIe Device Listing ===");
+        info!("Total devices found: {}", manager.devices.len());
+        info!("");
+
+        // Group devices by class for better organization
+        let mut devices_by_class: alloc::collections::BTreeMap<u8, Vec<&pci::device::PciDevice>> =
+            alloc::collections::BTreeMap::new();
+
+        for device in &manager.devices {
+            devices_by_class.entry(device.class_code).or_insert_with(Vec::new).push(device);
+        }
+
+        for (class_code, devices) in devices_by_class {
+            let class_name = match class_code {
+                device_classes::UNCLASSIFIED => "Unclassified",
+                device_classes::MASS_STORAGE => "Mass Storage",
+                device_classes::NETWORK => "Network",
+                device_classes::DISPLAY => "Display",
+                device_classes::MULTIMEDIA => "Multimedia",
+                device_classes::MEMORY => "Memory",
+                device_classes::BRIDGE => "Bridge",
+                device_classes::COMMUNICATION => "Communication",
+                device_classes::SYSTEM_PERIPHERAL => "System Peripheral",
+                device_classes::INPUT_DEVICE => "Input Device",
+                device_classes::DOCKING_STATION => "Docking Station",
+                device_classes::PROCESSOR => "Processor",
+                device_classes::SERIAL_BUS => "Serial Bus",
+                device_classes::WIRELESS => "Wireless",
+                device_classes::INTELLIGENT_IO => "Intelligent I/O",
+                device_classes::SATELLITE_COMMUNICATION => "Satellite Communication",
+                device_classes::ENCRYPTION => "Encryption",
+                device_classes::DATA_ACQUISITION => "Data Acquisition",
+                device_classes::PROCESSING_ACCELERATOR => "Processing Accelerator",
+                device_classes::NON_ESSENTIAL_INSTRUMENTATION => "Non-Essential Instrumentation",
+                device_classes::COPROCESSOR => "Coprocessor",
+                _ => "Unknown",
+            };
+
+            info!("--- {} Devices (Class {:02x}h) ---", class_name, class_code);
+
+            for device in devices {
+                let vendor_name = match device.vendor_id {
+                    vendor_ids::INTEL => "Intel",
+                    vendor_ids::AMD => "AMD",
+                    vendor_ids::NVIDIA => "NVIDIA",
+                    vendor_ids::BROADCOM => "Broadcom",
+                    vendor_ids::QUALCOMM => "Qualcomm",
+                    vendor_ids::MARVELL => "Marvell",
+                    vendor_ids::REALTEK => "Realtek",
+                    vendor_ids::VIA => "VIA",
+                    vendor_ids::VMWARE => "VMware",
+                    vendor_ids::QEMU => "QEMU",
+                    vendor_ids::REDHAT => "Red Hat",
+                    _ => "Unknown",
+                };
+
+                info!("  {:02x}:{:02x}.{} [{:04x}:{:04x}] {} - {} (rev {:02x})",
+                    device.bus,
+                    device.device,
+                    device.function,
+                    device.vendor_id,
+                    device.device_id,
+                    vendor_name,
+                    device.description(),
+                    device.revision_id
+                );
+
+                // Show interrupt capabilities
+                let mut interrupt_info = Vec::new();
+                if device.supports_msix() {
+                    interrupt_info.push("MSI-X");
+                }
+                if device.supports_msi() {
+                    interrupt_info.push("MSI");
+                }
+                if device.interrupt_pin != 0 {
+                    interrupt_info.push("INTx");
+                }
+
+                if !interrupt_info.is_empty() {
+                    info!("    Interrupts: {}", interrupt_info.join(", "));
+                }
+
+                // Show active BARs
+                let mut active_bars = Vec::new();
+                for (i, bar) in device.bars.iter().enumerate() {
+                    match bar {
+                        pci::device::BarInfo::Memory { address, size, prefetchable, .. } => {
+                            active_bars.push(format!("BAR{}: Memory {:#x} ({}KB{})",
+                                i, address.as_u64(), size >> 10,
+                                if *prefetchable { ", prefetchable" } else { "" }));
+                        },
+                        pci::device::BarInfo::Io { address, size } => {
+                            active_bars.push(format!("BAR{}: I/O {:#x} ({}B)", i, address, size));
+                        },
+                        pci::device::BarInfo::Unused => {},
+                    }
+                }
+
+                for bar_info in active_bars {
+                    info!("    {}", bar_info);
+                }
+
+                // Show capabilities count
+                if !device.capabilities.is_empty() {
+                    info!("    Capabilities: {} found", device.capabilities.len());
+                }
+            }
+            info!("");
+        }
+
+        info!("=== End PCIe Device Listing ===");
+    } else {
+        warn!("PCIe manager not initialized");
+    }
 }
 
 
