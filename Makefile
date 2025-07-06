@@ -18,6 +18,7 @@ run: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME).iso
 		-M q35 \
 		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-x86_64.fd,readonly=on \
 		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-x86_64.fd \
+		-device qemu-xhci \
 		-cdrom $(IMAGE_NAME).iso \
 		$(QEMUFLAGS)
 
