@@ -10,12 +10,13 @@ use alloc::vec::Vec;
 use core::fmt;
 use x86_64::PhysAddr;
 
-use crate::debug;
+use crate::{debug, hcf, serial_println};
 
 use super::{
-    mcfg::{EcamRegion, read_config_u32, read_config_u16, read_config_u8},
+    mcfg::{EcamRegion, read_config_u32, write_config_u32, read_config_u16, read_config_u8},
     PciError,
 };
+
 
 /// PCIe configuration space offsets
 pub mod config_offsets {
@@ -322,7 +323,8 @@ fn parse_bars(
                 (bar_value & 0xFFFFFFF0) as u64
             };
 
-            let size = 0;
+            // Determine BAR size using the standard method
+            let size = determine_bar_size(ecam_region, bus, device, function, bar_offset, is_64bit);
 
             bars[i] = BarInfo::Memory {
                 address: PhysAddr::new(address_raw),
@@ -339,7 +341,7 @@ fn parse_bars(
         } else {
             // I/O BAR
             let address = bar_value & 0xFFFFFFFC;
-            let size = 0; // TODO: Determine size
+            let size = determine_io_bar_size(ecam_region, bus, device, function, bar_offset);
 
             bars[i] = BarInfo::Io { address, size };
             i += 1;
@@ -379,4 +381,87 @@ fn parse_capabilities(
     }
 
     Ok(capabilities)
+}
+
+/// Determine the size of a memory BAR using the standard write-all-1s method
+fn determine_bar_size(
+    ecam_region: &EcamRegion,
+    bus: u8,
+    device: u8,
+    function: u8,
+    bar_offset: u16,
+    is_64bit: bool,
+) -> u64 {
+    use super::mcfg::{read_config_u32, write_config_u32};
+
+    // Save original BAR values
+    let original_low = read_config_u32(ecam_region, bus, device, function, bar_offset);
+    let original_high = if is_64bit {
+        read_config_u32(ecam_region, bus, device, function, bar_offset + 4)
+    } else {
+        0
+    };
+
+    if is_64bit {
+        write_config_u32(ecam_region, bus, device, function, bar_offset, 0xFFFFFFFF);
+        write_config_u32(ecam_region, bus, device, function, bar_offset + 4, 0xFFFFFFFF);
+
+        let size_low = read_config_u32(ecam_region, bus, device, function, bar_offset);
+        let size_high = read_config_u32(ecam_region, bus, device, function, bar_offset + 4);
+
+        write_config_u32(ecam_region, bus, device, function, bar_offset + 4, original_high);
+        write_config_u32(ecam_region, bus, device, function, bar_offset, original_low);
+
+        let size_mask_64 = ((size_high as u64) << 32) | ((size_low & 0xFFFFFFF0) as u64);
+        
+        if size_mask_64 == 0 {
+            0
+        } else {
+            (!size_mask_64) + 1
+        }
+    } else {
+        write_config_u32(ecam_region, bus, device, function, bar_offset, 0xFFFFFFFF);
+        let size_low = read_config_u32(ecam_region, bus, device, function, bar_offset);
+
+        write_config_u32(ecam_region, bus, device, function, bar_offset, original_low);
+
+        // IMPORTANT FIX: Perform bitwise NOT on u32, then cast to u64
+        let size_mask_32 = size_low & 0xFFFFFFF0; // Keep as u32
+
+        if size_mask_32 == 0 {
+            0
+        } else {
+            !size_mask_32 as u64 + 1
+        }
+    }
+}
+
+/// Determine the size of an I/O BAR using the standard write-all-1s method
+fn determine_io_bar_size(
+    ecam_region: &EcamRegion,
+    bus: u8,
+    device: u8,
+    function: u8,
+    bar_offset: u16,
+) -> u32 {
+    use super::mcfg::{read_config_u32, write_config_u32};
+
+    // Save original BAR value
+    let original = read_config_u32(ecam_region, bus, device, function, bar_offset);
+
+    // Write all 1s to determine size
+    write_config_u32(ecam_region, bus, device, function, bar_offset, 0xFFFFFFFF);
+    let size_mask = read_config_u32(ecam_region, bus, device, function, bar_offset);
+
+    // Restore original BAR value
+    write_config_u32(ecam_region, bus, device, function, bar_offset, original);
+
+    // Calculate size (mask off the lower 2 bits for I/O BARs)
+    let size_mask = size_mask & 0xFFFFFFFC;
+
+    if size_mask == 0 {
+        0
+    } else {
+        (!size_mask) + 1
+    }
 }

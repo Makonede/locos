@@ -199,9 +199,7 @@ pub fn debug_ecam_region(region: &EcamRegion) {
         region.mapping_size() >> 10
     );
 
-    if let Err(error) = validate_ecam_region(region) {
-        warn!("ECAM region validation failed: {}", error);
-    }
+    validate_ecam_region(region).expect("ECAM region validation failed");
 }
 
 /// Map an entire ECAM region to virtual memory

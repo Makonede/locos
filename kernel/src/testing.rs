@@ -45,7 +45,7 @@ where
 pub fn test_runner(tests: &[&dyn Testable]) {
     use crate::{hcf, serial_print, serial_println, tasks::scheduler::kinit_multitasking};
 
-    serial_print!("\x1b[2J\x1b[H");
+    //serial_print!("\x1b[2J\x1b[H");
     serial_println!("Running {} tests", tests.len());
     for test in tests {
         test.run();

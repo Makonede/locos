@@ -7,6 +7,8 @@ ovmf
 locos.iso
 locos-test.iso
 
+/docs
+
 
 # Added by cargo
 #

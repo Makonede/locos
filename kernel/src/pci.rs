@@ -13,6 +13,7 @@ pub mod config;
 pub mod device;
 pub mod mcfg;
 pub mod msi;
+pub mod vmm;
 
 #[cfg(test)]
 pub mod tests;
@@ -51,7 +52,7 @@ impl PciManager {
     /// Initialize the PCIe subsystem
     pub fn init(&mut self, rsdp_addr: usize) -> Result<(), PciError> {
         info!("Initializing PCIe subsystem");
-        
+
         // Parse MCFG table to get ECAM regions
         self.ecam_regions = mcfg::parse_mcfg_table(rsdp_addr)?;
         info!("Found {} ECAM regions", self.ecam_regions.len());
@@ -70,6 +71,9 @@ impl PciManager {
         // Enumerate all PCIe devices
         self.enumerate_devices()?;
         info!("Discovered {} PCIe devices", self.devices.len());
+
+        // Check BAR assignment status
+        self.check_bar_assignment();
 
         Ok(())
     }
@@ -113,6 +117,68 @@ impl PciManager {
     /// Get all devices of a specific class
     pub fn get_devices_by_class(&self, class_code: u8) -> Vec<&device::PciDevice> {
         self.devices.iter().filter(|dev| dev.class_code == class_code).collect()
+    }
+
+    /// Check BAR assignment status for all devices
+    fn check_bar_assignment(&self) {
+        use crate::{info, warn};
+
+        let mut assigned_count = 0;
+        let mut unassigned_count = 0;
+
+        #[inline]
+        fn process_bar(
+            device: &device::PciDevice,
+            bar_index: usize,
+            bar: &device::BarInfo,
+            assigned_count: &mut usize,
+            unassigned_count: &mut usize,
+        ) {
+            match bar {
+                device::BarInfo::Memory { address, size, .. } => {
+                    if address.as_u64() == 0 {
+                        warn!("Device {:02x}:{:02x}.{} BAR{}: Memory BAR not assigned by UEFI (size={}KB)",
+                              device.bus, device.device, device.function, bar_index, size >> 10);
+                        *unassigned_count += 1;
+                    } else if *size == 0 {
+                        warn!("Device {:02x}:{:02x}.{} BAR{}: Memory BAR has zero size at {:#x}",
+                              device.bus, device.device, device.function, bar_index, address.as_u64());
+                    } else {
+                        *assigned_count += 1;
+                    }
+                },
+                device::BarInfo::Io { address, size } => {
+                    if *address == 0 {
+                        warn!("Device {:02x}:{:02x}.{} BAR{}: I/O BAR not assigned by UEFI (size={}B)",
+                              device.bus, device.device, device.function, bar_index, size);
+                        *unassigned_count += 1;
+                    } else {
+                        *assigned_count += 1;
+                    }
+                },
+                device::BarInfo::Unused => {},
+            }
+        }
+
+        for device in &self.devices {
+            for (i, bar) in device.bars.iter().enumerate() {
+                process_bar(device, i, bar, &mut assigned_count, &mut unassigned_count);
+            }
+        }
+
+        info!("BAR assignment check: {} assigned, {} unassigned",
+              assigned_count, unassigned_count);
+
+        if unassigned_count > 0 {
+            warn!("{} BARs were not assigned addresses by UEFI!", unassigned_count);
+        }
+
+        // Print VMM statistics
+        let vmm_lock = vmm::get_pcie_vmm().lock();
+        let stats = vmm_lock.get_stats();
+        info!("PCIe VMM initialized: {}/{} pages available ({}MB/{}MB)",
+              stats.free_pages, stats.total_pages,
+              stats.free_size >> 20, stats.total_size >> 20);
     }
 }
 

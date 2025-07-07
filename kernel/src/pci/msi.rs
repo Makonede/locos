@@ -68,6 +68,8 @@ pub struct MsiXInfo {
     pub pba_virtual_addr: Option<u64>,
     /// Allocated interrupt vectors
     pub vectors: Vec<MsiXVector>,
+    /// Mapped BARs for this device
+    pub mapped_bars: Vec<super::vmm::MappedBar>,
 }
 
 /// MSI-X vector information
@@ -239,44 +241,134 @@ impl MsiXInfo {
             table_virtual_addr: None,
             pba_virtual_addr: None,
             vectors: Vec::new(),
+            mapped_bars: Vec::new(),
         })
     }
 
     /// Map MSI-X table and PBA to virtual memory
     pub fn map_structures(&mut self) -> Result<(), PciError> {
-        use super::device::BarInfo;
+        use crate::{info, warn};
 
-        // Get the BAR that contains the MSI-X table
+        // First, map all the device BARs and store the mappings
+        self.map_device_bars()?;
+
+        // Get the BAR that contains the MSI-X table and find its virtual mapping
         if let Some(super::device::BarInfo::Memory { address, .. }) = self.device.bars.get(self.table_bar as usize) {
-            self.table_virtual_addr = Some(address.as_u64() + self.table_offset as u64);
+            if address.as_u64() == 0 {
+                warn!("MSI-X table BAR {} not assigned by UEFI", self.table_bar);
+                return Err(PciError::MsiXSetupFailed);
+            }
+
+            // Find the virtual mapping for this BAR
+            let virtual_base = self.find_bar_virtual_address(self.table_bar)?;
+            self.table_virtual_addr = Some(virtual_base + self.table_offset as u64);
+
             info!(
-                "MSI-X table mapped at virtual address {:#x}",
-                self.table_virtual_addr.unwrap()
+                "MSI-X table mapped: phys={:#x} -> virt={:#x} (offset={:#x})",
+                address.as_u64(),
+                self.table_virtual_addr.unwrap(),
+                self.table_offset
             );
+        } else if self.device.bars.get(self.table_bar as usize).is_some() {
+            warn!("MSI-X table BAR {} is not a memory BAR", self.table_bar);
+            return Err(PciError::MsiXSetupFailed);
         } else {
-            warn!(
-                "MSI-X table BAR is not a memory BAR or index {} is invalid",
-                self.table_bar
-            );
+            warn!("MSI-X table BAR index {} is invalid", self.table_bar);
             return Err(PciError::MsiXSetupFailed);
         }
 
-        // Get the BAR that contains the PBA
+        // Get the BAR that contains the PBA and find its virtual mapping
         if let Some(super::device::BarInfo::Memory { address, .. }) = self.device.bars.get(self.pba_bar as usize) {
-            self.pba_virtual_addr = Some(address.as_u64() + self.pba_offset as u64);
+            if address.as_u64() == 0 {
+                warn!("MSI-X PBA BAR {} not assigned by UEFI", self.pba_bar);
+                return Err(PciError::MsiXSetupFailed);
+            }
+
+            // Find the virtual mapping for this BAR
+            let virtual_base = self.find_bar_virtual_address(self.pba_bar)?;
+            self.pba_virtual_addr = Some(virtual_base + self.pba_offset as u64);
+
             info!(
-                "MSI-X PBA mapped at virtual address {:#x}",
-                self.pba_virtual_addr.unwrap()
+                "MSI-X PBA mapped: phys={:#x} -> virt={:#x} (offset={:#x})",
+                address.as_u64(),
+                self.pba_virtual_addr.unwrap(),
+                self.pba_offset
             );
+        } else if self.device.bars.get(self.pba_bar as usize).is_some() {
+            warn!("MSI-X PBA BAR {} is not a memory BAR", self.pba_bar);
+            return Err(PciError::MsiXSetupFailed);
         } else {
-            warn!(
-                "MSI-X PBA BAR is not a memory BAR or index {} is invalid",
-                self.pba_bar
-            );
+            warn!("MSI-X PBA BAR index {} is invalid", self.pba_bar);
             return Err(PciError::MsiXSetupFailed);
         }
 
         Ok(())
+    }
+
+    /// Map all device BARs that aren't already mapped
+    fn map_device_bars(&mut self) -> Result<(), PciError> {
+        use super::vmm;
+        use crate::info;
+
+        #[inline]
+        fn try_map_memory_bar(
+            bar: &super::device::BarInfo,
+            address: x86_64::PhysAddr,
+            mapped_bars: &mut Vec<super::vmm::MappedBar>,
+        ) -> Result<(), PciError> {
+            // Check if this BAR is already mapped by this MSI-X instance
+            let already_mapped = mapped_bars.iter().any(|mapped|
+                mapped.physical_address == address
+            );
+
+            if !already_mapped {
+                // Try to map the BAR - vmm::map_bar handles global deduplication
+                match vmm::map_bar(bar) {
+                    Ok(Some(mapped)) => {
+                        info!("MSI-X mapped BAR: phys={:#x} -> virt={:#x}",
+                              mapped.physical_address.as_u64(),
+                              mapped.virtual_address.as_u64());
+                        mapped_bars.push(mapped);
+                    },
+                    Ok(None) => {
+                        // BAR was skipped (zero size, I/O BAR, etc.)
+                    },
+                    Err(e) => {
+                        // If mapping fails, it might already be mapped globally
+                        // Try to find existing mapping in global VMM
+                        if let Some(existing_mapping) = vmm::find_existing_mapping(address)? {
+                            mapped_bars.push(existing_mapping);
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        for bar in self.device.bars.iter() {
+            if let super::device::BarInfo::Memory { address, .. } = bar
+                && address.as_u64() != 0 {
+                    try_map_memory_bar(bar, *address, &mut self.mapped_bars)?;
+                }
+        }
+        Ok(())
+    }
+
+    /// Find the virtual address for a specific BAR index
+    fn find_bar_virtual_address(&self, bar_index: u8) -> Result<u64, PciError> {
+        if let Some(bar_info) = self.device.bars.get(bar_index as usize)
+            && let super::device::BarInfo::Memory { address, .. } = bar_info {
+                // Find the corresponding mapped BAR
+                for mapped in &self.mapped_bars {
+                    if mapped.physical_address == *address {
+                        return Ok(mapped.virtual_address.as_u64());
+                    }
+                }
+                return Err(PciError::MsiXSetupFailed);
+            }
+        Err(PciError::InvalidDevice)
     }
 
     /// Allocate and configure MSI-X vectors

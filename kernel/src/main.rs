@@ -269,29 +269,33 @@ fn list_pcie_devices() {
                     info!("    Interrupts: {}", interrupt_info.join(", "));
                 }
 
-                // Show active BARs
-                let mut active_bars = Vec::new();
+                // Show BAR assignment status
+                let mut bar_status = Vec::new();
                 for (i, bar) in device.bars.iter().enumerate() {
                     match bar {
                         pci::device::BarInfo::Memory { address, size, prefetchable, .. } => {
-                            active_bars.push(format!("BAR{}: Memory {:#x} ({}KB{})",
-                                i, address.as_u64(), size >> 10,
+                            let assigned = address.as_u64() != 0;
+                            let status = if assigned { "ASSIGNED" } else { "UNASSIGNED" };
+                            bar_status.push(format!("BAR{}: Memory {:#x} [{}] (size={}KB{})",
+                                i, address.as_u64(), status, size >> 10,
                                 if *prefetchable { ", prefetchable" } else { "" }));
                         },
                         pci::device::BarInfo::Io { address, size } => {
-                            active_bars.push(format!("BAR{}: I/O {:#x} ({}B)", i, address, size));
+                            let assigned = *address != 0;
+                            let status = if assigned { "ASSIGNED" } else { "UNASSIGNED" };
+                            bar_status.push(format!("BAR{i}: I/O {address:#x} [{status}] (size={size}B)"));
                         },
                         pci::device::BarInfo::Unused => {},
                     }
                 }
 
-                for bar_info in active_bars {
+                for bar_info in bar_status {
                     info!("    {}", bar_info);
                 }
 
-                // Show capabilities count
-                if !device.capabilities.is_empty() {
-                    info!("    Capabilities: {} found", device.capabilities.len());
+                // Show capabilities
+                for capability in &device.capabilities {
+                    info!("    Capability: {:02x}h (next: {:02x}h)", capability.id, capability.next_ptr);
                 }
             }
             info!("");
