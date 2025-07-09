@@ -195,7 +195,7 @@ fn list_pcie_devices() {
             alloc::collections::BTreeMap::new();
 
         for device in &manager.devices {
-            devices_by_class.entry(device.class_code).or_insert_with(Vec::new).push(device);
+            devices_by_class.entry(device.class_code).or_default().push(device);
         }
 
         for (class_code, devices) in devices_by_class {
