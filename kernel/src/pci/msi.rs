@@ -253,8 +253,8 @@ impl MsiXInfo {
         self.map_device_bars()?;
 
         // Get the BAR that contains the MSI-X table and find its virtual mapping
-        if let Some(super::device::BarInfo::Memory { address, .. }) = self.device.bars.get(self.table_bar as usize) {
-            if address.as_u64() == 0 {
+        if let Some(super::device::BarInfo::Memory(memory_bar)) = self.device.bars.get(self.table_bar as usize) {
+            if memory_bar.address.as_u64() == 0 {
                 warn!("MSI-X table BAR {} not assigned by UEFI", self.table_bar);
                 return Err(PciError::MsiXSetupFailed);
             }
@@ -265,7 +265,7 @@ impl MsiXInfo {
 
             info!(
                 "MSI-X table mapped: phys={:#x} -> virt={:#x} (offset={:#x})",
-                address.as_u64(),
+                memory_bar.address.as_u64(),
                 self.table_virtual_addr.unwrap(),
                 self.table_offset
             );
@@ -278,8 +278,8 @@ impl MsiXInfo {
         }
 
         // Get the BAR that contains the PBA and find its virtual mapping
-        if let Some(super::device::BarInfo::Memory { address, .. }) = self.device.bars.get(self.pba_bar as usize) {
-            if address.as_u64() == 0 {
+        if let Some(super::device::BarInfo::Memory(memory_bar)) = self.device.bars.get(self.pba_bar as usize) {
+            if memory_bar.address.as_u64() == 0 {
                 warn!("MSI-X PBA BAR {} not assigned by UEFI", self.pba_bar);
                 return Err(PciError::MsiXSetupFailed);
             }
@@ -290,7 +290,7 @@ impl MsiXInfo {
 
             info!(
                 "MSI-X PBA mapped: phys={:#x} -> virt={:#x} (offset={:#x})",
-                address.as_u64(),
+                memory_bar.address.as_u64(),
                 self.pba_virtual_addr.unwrap(),
                 self.pba_offset
             );
@@ -312,7 +312,7 @@ impl MsiXInfo {
 
         #[inline]
         fn try_map_memory_bar(
-            bar: &super::device::BarInfo,
+            memory_bar: &super::device::MemoryBar,
             address: x86_64::PhysAddr,
             mapped_bars: &mut Vec<super::vmm::MappedBar>,
         ) -> Result<(), PciError> {
@@ -323,15 +323,12 @@ impl MsiXInfo {
 
             if !already_mapped {
                 // Try to map the BAR - vmm::map_bar handles global deduplication
-                match vmm::map_bar(bar) {
-                    Ok(Some(mapped)) => {
+                match vmm::map_bar(memory_bar) {
+                    Ok(mapped) => {
                         info!("MSI-X mapped BAR: phys={:#x} -> virt={:#x}",
                               mapped.physical_address.as_u64(),
                               mapped.virtual_address.as_u64());
                         mapped_bars.push(mapped);
-                    },
-                    Ok(None) => {
-                        // BAR was skipped (zero size, I/O BAR, etc.)
                     },
                     Err(e) => {
                         // If mapping fails, it might already be mapped globally
@@ -348,9 +345,9 @@ impl MsiXInfo {
         }
 
         for bar in self.device.bars.iter() {
-            if let super::device::BarInfo::Memory { address, .. } = bar
-                && address.as_u64() != 0 {
-                    try_map_memory_bar(bar, *address, &mut self.mapped_bars)?;
+            if let super::device::BarInfo::Memory(memory_bar) = bar
+                && memory_bar.address.as_u64() != 0 {
+                    try_map_memory_bar(memory_bar, memory_bar.address, &mut self.mapped_bars)?;
                 }
         }
         Ok(())
@@ -359,10 +356,10 @@ impl MsiXInfo {
     /// Find the virtual address for a specific BAR index
     fn find_bar_virtual_address(&self, bar_index: u8) -> Result<u64, PciError> {
         if let Some(bar_info) = self.device.bars.get(bar_index as usize)
-            && let super::device::BarInfo::Memory { address, .. } = bar_info {
+            && let super::device::BarInfo::Memory(memory_bar) = bar_info {
                 // Find the corresponding mapped BAR
                 for mapped in &self.mapped_bars {
-                    if mapped.physical_address == *address {
+                    if mapped.physical_address == memory_bar.address {
                         return Ok(mapped.virtual_address.as_u64());
                     }
                 }

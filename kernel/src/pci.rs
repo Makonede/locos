@@ -15,13 +15,15 @@ pub mod mcfg;
 pub mod msi;
 pub mod vmm;
 
+pub mod usb;
+
 #[cfg(test)]
 pub mod tests;
 
 use alloc::vec::Vec;
 use spin::Mutex;
 
-use crate::info;
+use crate::{info, pci::{device::{IoBar, MemoryBar}, vmm::PCIE_VMM}, warn};
 
 /// Global PCIe manager instance
 pub static PCI_MANAGER: Mutex<Option<PciManager>> = Mutex::new(None);
@@ -121,48 +123,35 @@ impl PciManager {
 
     /// Check BAR assignment status for all devices
     fn check_bar_assignment(&self) {
-        use crate::{info, warn};
-
         let mut assigned_count = 0;
         let mut unassigned_count = 0;
 
-        #[inline]
-        fn process_bar(
-            device: &device::PciDevice,
-            bar_index: usize,
-            bar: &device::BarInfo,
-            assigned_count: &mut usize,
-            unassigned_count: &mut usize,
-        ) {
-            match bar {
-                device::BarInfo::Memory { address, size, .. } => {
-                    if address.as_u64() == 0 {
-                        warn!("Device {:02x}:{:02x}.{} BAR{}: Memory BAR not assigned by UEFI (size={}KB)",
-                              device.bus, device.device, device.function, bar_index, size >> 10);
-                        *unassigned_count += 1;
-                    } else if *size == 0 {
-                        warn!("Device {:02x}:{:02x}.{} BAR{}: Memory BAR has zero size at {:#x}",
-                              device.bus, device.device, device.function, bar_index, address.as_u64());
-                    } else {
-                        *assigned_count += 1;
-                    }
-                },
-                device::BarInfo::Io { address, size } => {
-                    if *address == 0 {
-                        warn!("Device {:02x}:{:02x}.{} BAR{}: I/O BAR not assigned by UEFI (size={}B)",
-                              device.bus, device.device, device.function, bar_index, size);
-                        *unassigned_count += 1;
-                    } else {
-                        *assigned_count += 1;
-                    }
-                },
-                device::BarInfo::Unused => {},
-            }
-        }
-
         for device in &self.devices {
             for (i, bar) in device.bars.iter().enumerate() {
-                process_bar(device, i, bar, &mut assigned_count, &mut unassigned_count);
+                match bar {
+                    device::BarInfo::Memory(MemoryBar { address, size, .. }) => {
+                        if address.as_u64() == 0 {
+                            warn!("Device {:02x}:{:02x}.{} BAR{}: Memory BAR not assigned by UEFI (size={}KB)",
+                                  device.bus, device.device, device.function, i, size >> 10);
+                            unassigned_count += 1;
+                        } else if *size == 0 {
+                            warn!("Device {:02x}:{:02x}.{} BAR{}: Memory BAR has zero size at {:#x}",
+                                  device.bus, device.device, device.function, i, address.as_u64());
+                        } else {
+                            assigned_count += 1;
+                        }
+                    },
+                    device::BarInfo::Io(IoBar { address, size }) => {
+                        if *address == 0 {
+                            warn!("Device {:02x}:{:02x}.{} BAR{}: I/O BAR not assigned by UEFI (size={}B)",
+                                  device.bus, device.device, device.function, i, size);
+                            unassigned_count += 1;
+                        } else {
+                            assigned_count += 1;
+                        }
+                    },
+                    device::BarInfo::Unused => {},
+                }
             }
         }
 
@@ -174,7 +163,7 @@ impl PciManager {
         }
 
         // Print VMM statistics
-        let vmm_lock = vmm::get_pcie_vmm().lock();
+        let vmm_lock = PCIE_VMM.lock();
         let stats = vmm_lock.get_stats();
         info!("PCIe VMM initialized: {}/{} pages available ({}MB/{}MB)",
               stats.free_pages, stats.total_pages,
@@ -209,7 +198,3 @@ pub fn init_pci(rsdp_addr: usize) -> Result<(), PciError> {
     Ok(())
 }
 
-/// Get a reference to the global PCIe manager
-pub fn get_pci_manager() -> &'static Mutex<Option<PciManager>> {
-    &PCI_MANAGER
-}

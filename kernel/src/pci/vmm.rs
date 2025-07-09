@@ -12,10 +12,10 @@ use x86_64::{
 
 use crate::{
     info,
-    memory::{FRAME_ALLOCATOR, PAGE_TABLE},
+    memory::{FRAME_ALLOCATOR, PAGE_TABLE}, pci::device::MemoryBar,
 };
 
-use super::{device::BarInfo, PciError};
+use super::PciError;
 
 /// Virtual address space start for PCIe BAR mappings
 /// Moved further away from ECAM space to avoid collisions
@@ -72,7 +72,7 @@ impl PcieVmm {
         size: u64,
         prefetchable: bool,
     ) -> Result<MappedBar, PciError> {
-        if size == 0 {
+        if size == 0 || physical_address.as_u64() == 0 {
             return Err(PciError::InvalidDevice);
         }
 
@@ -329,29 +329,14 @@ pub struct VmmStats {
     pub free_size: u64,
 }
 
-/// Get a reference to the global PCIe VMM
-pub fn get_pcie_vmm() -> &'static Mutex<PcieVmm> {
-    &PCIE_VMM
-}
-
 /// Map a BAR using the global VMM
-pub fn map_bar(bar_info: &BarInfo) -> Result<Option<MappedBar>, PciError> {
-    match bar_info {
-        BarInfo::Memory { address, size, prefetchable, .. } => {
-            if address.as_u64() == 0 || *size == 0 {
-                return Ok(None);
-            }
-
-            let mut vmm_lock = PCIE_VMM.lock();
-            let mapped = vmm_lock.map_memory_bar(*address, *size, *prefetchable)?;
-            Ok(Some(mapped))
-        },
-        BarInfo::Io { .. } => {
-            // I/O BARs don't need virtual memory mapping
-            Ok(None)
-        },
-        BarInfo::Unused => Ok(None),
-    }
+/// Bar MUST be a memory BAR
+pub fn map_bar(bar_info: &MemoryBar) -> Result<MappedBar, PciError> {
+    let MemoryBar { address, size, prefetchable, .. } = bar_info;
+    
+    let mut vmm_lock = PCIE_VMM.lock();
+    let mapped = vmm_lock.map_memory_bar(*address, *size, *prefetchable)?;
+    Ok(mapped)
 }
 
 /// Find an existing mapping for a physical address (placeholder for now)

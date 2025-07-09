@@ -61,19 +61,37 @@ pub enum HeaderType {
 #[derive(Debug, Clone, Copy)]
 pub enum BarInfo {
     /// Memory BAR (physical address)
-    Memory {
-        address: PhysAddr,
-        size: u64,
-        prefetchable: bool,
-        is_64bit: bool,
-    },
+    Memory(MemoryBar),
     /// I/O BAR (I/O port address)
-    Io {
-        address: u32,
-        size: u32,
-    },
+    Io(IoBar),
     /// Unused BAR
     Unused,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MemoryBar {
+    pub address: PhysAddr,
+    pub size: u64,
+    pub prefetchable: bool,
+    pub is_64bit: bool,
+}
+
+impl MemoryBar {
+    pub fn new(address: PhysAddr, size: u64, prefetchable: bool, is_64bit: bool) -> Self {
+        Self { address, size, prefetchable, is_64bit }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IoBar {
+    pub address: u32,
+    pub size: u32,
+}
+
+impl IoBar {
+    pub fn new(address: u32, size: u32) -> Self {
+        Self { address, size }
+    }
 }
 
 /// PCIe capability header
@@ -326,12 +344,14 @@ fn parse_bars(
             // Determine BAR size using the standard method
             let size = determine_bar_size(ecam_region, bus, device, function, bar_offset, is_64bit);
 
-            bars[i] = BarInfo::Memory {
-                address: PhysAddr::new(address_raw),
-                size,
-                prefetchable,
-                is_64bit,
-            };
+            bars[i] = BarInfo::Memory(
+                MemoryBar::new(
+                    PhysAddr::new(address_raw),
+                    size,
+                    prefetchable,
+                    is_64bit,
+                )
+            );
 
             if is_64bit {
                 i += 2; // Skip next BAR as it's the high part
@@ -343,7 +363,7 @@ fn parse_bars(
             let address = bar_value & 0xFFFFFFFC;
             let size = determine_io_bar_size(ecam_region, bus, device, function, bar_offset);
 
-            bars[i] = BarInfo::Io { address, size };
+            bars[i] = BarInfo::Io(IoBar::new(address, size));
             i += 1;
         }
     }

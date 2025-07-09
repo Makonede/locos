@@ -1,8 +1,8 @@
 //! PCIe subsystem tests
 
-use crate::serial_println;
+use crate::pci::vmm::PCIE_VMM;
 
-use super::{PCI_MANAGER, config::device_classes, vmm, device::BarInfo};
+use super::{PCI_MANAGER, config::device_classes, vmm, device::{BarInfo, MemoryBar, IoBar}};
 use x86_64::PhysAddr;
 
 #[test_case]
@@ -51,7 +51,7 @@ fn test_device_classification() {
 
 #[test_case]
 fn test_vmm_bitmap_operations() {
-    let mut vmm_lock = vmm::get_pcie_vmm().lock();
+    let mut vmm_lock = PCIE_VMM.lock();
     let initial_stats = vmm_lock.get_stats();
 
     // Test mapping a small BAR (4KB)
@@ -83,7 +83,7 @@ fn test_vmm_bitmap_operations() {
 
 #[test_case]
 fn test_vmm_large_allocation() {
-    let mut vmm_lock = vmm::get_pcie_vmm().lock();
+    let mut vmm_lock = PCIE_VMM.lock();
 
     // Test mapping a larger BAR (1MB)
     let test_phys_addr = PhysAddr::new(0x2000_0000);
@@ -108,20 +108,17 @@ fn test_vmm_large_allocation() {
 #[test_case]
 fn test_bar_mapping_interface() {
     // Test the high-level BAR mapping interface
-    let test_memory_bar = BarInfo::Memory {
-        address: PhysAddr::new(0x3000_0000),
-        size: 8192, // 8KB
-        prefetchable: false,
-        is_64bit: false,
-    };
+    let test_memory_bar = MemoryBar::new(
+        PhysAddr::new(0x3000_0000),
+        8192, // 8KB
+        false, // prefetchable
+        false, // is_64bit
+    );
 
     let map_result = vmm::map_bar(&test_memory_bar);
     assert!(map_result.is_ok());
 
-    let mapped_opt = map_result.unwrap();
-    assert!(mapped_opt.is_some());
-
-    let mapped = mapped_opt.unwrap();
+    let mapped = map_result.unwrap();
     assert_eq!(mapped.physical_address.as_u64(), 0x3000_0000);
     assert_eq!(mapped.size, 8192);
     assert!(!mapped.prefetchable);
@@ -129,57 +126,52 @@ fn test_bar_mapping_interface() {
 
 #[test_case]
 fn test_bar_mapping_io_bars() {
-    // I/O BARs should not be mapped to virtual memory
-    let test_io_bar = BarInfo::Io {
-        address: 0x1000,
-        size: 256,
-    };
+    // I/O BARs should not be mapped to virtual memory - this test is no longer valid
+    // since map_bar now only accepts MemoryBar, not BarInfo
+    // We'll test that I/O BARs are handled correctly in device parsing instead
+    let test_io_bar = IoBar::new(0x1000, 256);
 
-    let map_result = vmm::map_bar(&test_io_bar);
-    assert!(map_result.is_ok());
-
-    let mapped_opt = map_result.unwrap();
-    assert!(mapped_opt.is_none()); // I/O BARs return None
+    // I/O BARs don't get mapped through the VMM, so we just verify the struct works
+    assert_eq!(test_io_bar.address, 0x1000);
+    assert_eq!(test_io_bar.size, 256);
 }
 
 #[test_case]
 fn test_bar_mapping_zero_address() {
     // BARs with zero address should not be mapped
-    let test_zero_bar = BarInfo::Memory {
-        address: PhysAddr::new(0),
-        size: 4096,
-        prefetchable: false,
-        is_64bit: false,
-    };
+    let test_zero_bar = MemoryBar::new(
+        PhysAddr::new(0),
+        4096,
+        false, // prefetchable
+        false, // is_64bit
+    );
 
     let map_result = vmm::map_bar(&test_zero_bar);
-    assert!(map_result.is_ok());
-
-    let mapped_opt = map_result.unwrap();
-    assert!(mapped_opt.is_none()); // Zero address returns None
+    // Zero address should cause an error because it indicates an unassigned BAR
+    assert!(map_result.is_err(), "VMM should reject BARs with zero address");
 }
 
 #[test_case]
 fn test_device_bar_parsing() {
     if let Some(manager) = PCI_MANAGER.lock().as_ref() {
         let mut memory_bars_found = 0;
-        let mut io_bars_found = 0;
+        let mut _io_bars_found = 0;
         let mut unused_bars_found = 0;
 
         for device in &manager.devices {
             for bar in &device.bars {
                 match bar {
-                    BarInfo::Memory { address, size, prefetchable: _, is_64bit: _ } => {
+                    BarInfo::Memory(memory_bar) => {
                         memory_bars_found += 1;
-                        if address.as_u64() != 0 {
-                            assert!(*size > 0, "Memory BAR with non-zero address should have non-zero size");
-                            assert!(size.is_power_of_two(), "BAR size should be power of 2");
+                        if memory_bar.address.as_u64() != 0 {
+                            assert!(memory_bar.size > 0, "Memory BAR with non-zero address should have non-zero size");
+                            assert!(memory_bar.size.is_power_of_two(), "BAR size should be power of 2");
                         }
                     },
-                    BarInfo::Io { address, size } => {
-                        io_bars_found += 1;
-                        if *address != 0 {
-                            assert!(*size > 0, "I/O BAR with non-zero address should have non-zero size");
+                    BarInfo::Io(io_bar) => {
+                        _io_bars_found += 1;
+                        if io_bar.address != 0 {
+                            assert!(io_bar.size > 0, "I/O BAR with non-zero address should have non-zero size");
                         }
                     },
                     BarInfo::Unused => {
@@ -199,8 +191,8 @@ fn test_device_bar_parsing() {
 fn test_device_capabilities() {
     if let Some(manager) = PCI_MANAGER.lock().as_ref() {
         let mut devices_with_caps = 0;
-        let mut msi_caps_found = 0;
-        let mut msix_caps_found = 0;
+        let mut _msi_caps_found = 0;
+        let mut _msix_caps_found = 0;
 
         for device in &manager.devices {
             if !device.capabilities.is_empty() {
@@ -208,8 +200,8 @@ fn test_device_capabilities() {
 
                 for cap in &device.capabilities {
                     match cap.id {
-                        0x05 => msi_caps_found += 1,    // MSI capability
-                        0x11 => msix_caps_found += 1,   // MSI-X capability
+                        0x05 => _msi_caps_found += 1,    // MSI capability
+                        0x11 => _msix_caps_found += 1,   // MSI-X capability
                         _ => {}, // Other capabilities
                     }
 
@@ -253,7 +245,7 @@ fn test_device_interrupt_support() {
 
 #[test_case]
 fn test_vmm_allocation_alignment() {
-    let mut vmm_lock = vmm::get_pcie_vmm().lock();
+    let mut vmm_lock = PCIE_VMM.lock();
 
     // Test that allocations are properly page-aligned
     let test_phys_addr = PhysAddr::new(0x4000_0000);
@@ -277,7 +269,7 @@ fn test_vmm_allocation_alignment() {
 
 #[test_case]
 fn test_vmm_error_conditions() {
-    let mut vmm_lock = vmm::get_pcie_vmm().lock();
+    let mut vmm_lock = PCIE_VMM.lock();
 
     // Test zero size allocation
     let test_phys_addr = PhysAddr::new(0x5000_0000);

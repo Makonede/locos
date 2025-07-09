@@ -49,15 +49,14 @@ use memory::{init_frame_allocator, init_heap, init_page_allocator, paging::{self
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
 
-use crate::tasks::scheduler::kexit_task;
+use crate::{pci::{device::{IoBar, MemoryBar}, PCI_MANAGER}, tasks::scheduler::kexit_task};
 
 #[cfg(not(test))]
 use meta::tprint_welcome;
 #[cfg(not(test))]
 use crate::{interrupts::apic::LAPIC_TIMER_VECTOR, tasks::scheduler::{kcreate_task, kinit_multitasking}};
 
-#[cfg(test)]
-use x86_64::instructions::port::Port;
+
 
 pub const STACK_SIZE: u64 = 0x100000;
 
@@ -182,8 +181,7 @@ pub fn print_stuff() -> ! {
 fn list_pcie_devices() {
     use pci::config::{device_classes, vendor_ids};
 
-    let pci_manager = pci::get_pci_manager();
-    let manager_lock = pci_manager.lock();
+    let manager_lock = PCI_MANAGER.lock();
 
     if let Some(manager) = manager_lock.as_ref() {
         info!("=== PCIe Device Listing ===");
@@ -274,14 +272,14 @@ fn list_pcie_devices() {
                 let mut bar_status = Vec::new();
                 for (i, bar) in device.bars.iter().enumerate() {
                     match bar {
-                        pci::device::BarInfo::Memory { address, size, prefetchable, .. } => {
+                        pci::device::BarInfo::Memory(MemoryBar { address, size, prefetchable, .. }) => {
                             let assigned = address.as_u64() != 0;
                             let status = if assigned { "ASSIGNED" } else { "UNASSIGNED" };
                             bar_status.push(format!("BAR{}: Memory {:#x} [{}] (size={}KB{})",
                                 i, address.as_u64(), status, size >> 10,
                                 if *prefetchable { ", prefetchable" } else { "" }));
                         },
-                        pci::device::BarInfo::Io { address, size } => {
+                        pci::device::BarInfo::Io(IoBar { address, size }) => {
                             let assigned = *address != 0;
                             let status = if assigned { "ASSIGNED" } else { "UNASSIGNED" };
                             bar_status.push(format!("BAR{i}: I/O {address:#x} [{status}] (size={size}B)"));
