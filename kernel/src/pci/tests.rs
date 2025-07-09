@@ -198,16 +198,16 @@ fn test_device_capabilities() {
             if !device.capabilities.is_empty() {
                 devices_with_caps += 1;
 
-                for cap in &device.capabilities {
-                    match cap.id {
+                for (&cap_id, &offset) in &device.capabilities {
+                    match cap_id {
                         0x05 => _msi_caps_found += 1,    // MSI capability
                         0x11 => _msix_caps_found += 1,   // MSI-X capability
                         _ => {}, // Other capabilities
                     }
 
-                    // Capability should have valid next pointer
-                    assert!(cap.next_ptr == 0 || cap.next_ptr >= 0x40,
-                           "Capability next pointer should be 0 or >= 0x40");
+                    // Capability offset should be valid (>= 0x40 in config space)
+                    assert!(offset >= 0x40,
+                           "Capability offset should be >= 0x40, got {offset:#x}");
                 }
             }
         }

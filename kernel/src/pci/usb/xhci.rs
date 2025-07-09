@@ -24,6 +24,7 @@ pub fn xhci_init() {
     let primary_device = devices.first().expect("No XHCI devices found");
 
     assert!(primary_device.bars.len() == 1, "XHCI device has more than one BAR");
+    assert!(primary_device.supports_msix(), "XHCI device does not support MSI-X");
 
     if let BarInfo::Memory(memory_bar) = primary_device.bars[0] {
         map_bar(&memory_bar).unwrap();

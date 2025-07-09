@@ -293,8 +293,8 @@ fn list_pcie_devices() {
                 }
 
                 // Show capabilities
-                for capability in &device.capabilities {
-                    info!("    Capability: {:02x}h (next: {:02x}h)", capability.id, capability.next_ptr);
+                for (&cap_id, &offset) in &device.capabilities {
+                    info!("    Capability: {:02x}h at offset {:02x}h", cap_id, offset);
                 }
             }
             info!("");

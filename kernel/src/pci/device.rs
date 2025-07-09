@@ -6,11 +6,11 @@
 //! - Base Address Register (BAR) parsing
 //! - Device class and vendor identification
 
-use alloc::vec::Vec;
+use alloc::collections::BTreeMap;
 use core::fmt;
 use x86_64::PhysAddr;
 
-use crate::{debug, hcf, serial_println};
+use crate::debug;
 
 use super::{
     mcfg::{EcamRegion, read_config_u32, write_config_u32, read_config_u16, read_config_u8},
@@ -94,13 +94,6 @@ impl IoBar {
     }
 }
 
-/// PCIe capability header
-#[derive(Debug, Clone, Copy)]
-pub struct CapabilityHeader {
-    pub id: u8,
-    pub next_ptr: u8,
-}
-
 /// PCIe device representation
 #[derive(Debug, Clone)]
 pub struct PciDevice {
@@ -132,8 +125,8 @@ pub struct PciDevice {
     pub subsystem_id: u16,
     /// Base Address Registers
     pub bars: [BarInfo; 6],
-    /// List of capabilities
-    pub capabilities: Vec<CapabilityHeader>,
+    /// Map of capability ID to capability offset
+    pub capabilities: BTreeMap<u8, u8>,
     /// Interrupt line
     pub interrupt_line: u8,
     /// Interrupt pin
@@ -199,17 +192,17 @@ impl PciDevice {
 
     /// Check if device supports MSI-X
     pub fn supports_msix(&self) -> bool {
-        self.capabilities.iter().any(|cap| cap.id == 0x11)
+        self.capabilities.contains_key(&0x11)
     }
 
     /// Check if device supports MSI
     pub fn supports_msi(&self) -> bool {
-        self.capabilities.iter().any(|cap| cap.id == 0x05)
+        self.capabilities.contains_key(&0x05)
     }
 
-    /// Find a capability by ID
-    pub fn find_capability(&self, cap_id: u8) -> Option<&CapabilityHeader> {
-        self.capabilities.iter().find(|cap| cap.id == cap_id)
+    /// Find a capability by ID, returns the offset if found
+    pub fn find_capability(&self, cap_id: u8) -> Option<u8> {
+        self.capabilities.get(&cap_id).copied()
     }
 }
 
@@ -377,9 +370,9 @@ fn parse_capabilities(
     bus: u8,
     device: u8,
     function: u8,
-) -> Result<Vec<CapabilityHeader>, PciError> {
-    let mut capabilities = Vec::new();
-    
+) -> Result<BTreeMap<u8, u8>, PciError> {
+    let mut capabilities = BTreeMap::new();
+
     // Check if device has capabilities
     let status = read_config_u16(ecam_region, bus, device, function, config_offsets::STATUS);
     if (status & 0x10) == 0 {
@@ -387,16 +380,13 @@ fn parse_capabilities(
     }
 
     let mut cap_ptr = read_config_u8(ecam_region, bus, device, function, config_offsets::CAPABILITIES_PTR);
-    
+
     while cap_ptr != 0 && cap_ptr != 0xFF {
         let cap_id = read_config_u8(ecam_region, bus, device, function, cap_ptr as u16);
         let next_ptr = read_config_u8(ecam_region, bus, device, function, cap_ptr as u16 + 1);
-        
-        capabilities.push(CapabilityHeader {
-            id: cap_id,
-            next_ptr: cap_ptr,
-        });
-        
+
+        capabilities.insert(cap_id, cap_ptr);
+
         cap_ptr = next_ptr;
     }
 

@@ -539,7 +539,7 @@ pub fn setup_msi(device: &PciDevice, num_vectors: u8, base_vector: u8) -> Result
     let cap = device.find_capability(capability_ids::MSI)
         .ok_or(PciError::MsiXSetupFailed)?;
     
-    let mut msi_info = MsiInfo::from_device(device, cap.next_ptr as u16)?;
+    let mut msi_info = MsiInfo::from_device(device, cap as u16)?;
     msi_info.enable(base_vector, num_vectors)?;
     
     Ok(msi_info)
@@ -550,7 +550,7 @@ pub fn setup_msix(device: &PciDevice, num_vectors: u16, base_vector: u8) -> Resu
     let cap = device.find_capability(capability_ids::MSI_X)
         .ok_or(PciError::MsiXSetupFailed)?;
     
-    let mut msix_info = MsiXInfo::from_device(device, cap.next_ptr as u16)?;
+    let mut msix_info = MsiXInfo::from_device(device, cap as u16)?;
     msix_info.map_structures()?;
     msix_info.allocate_vectors(num_vectors, base_vector)?;
     msix_info.enable()?;
