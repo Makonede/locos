@@ -154,6 +154,7 @@ pub mod vendor_ids {
     pub const MICROSOFT: u16 = 0x1414;
     pub const VMWARE: u16 = 0x15AD;
     pub const QEMU: u16 = 0x1234;
+    pub const REDHAT_QEMU: u16 = 0x1B36;
     pub const REDHAT: u16 = 0x1AF4;
 }
 

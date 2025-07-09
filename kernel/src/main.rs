@@ -237,7 +237,8 @@ fn list_pcie_devices() {
                     vendor_ids::REALTEK => "Realtek",
                     vendor_ids::VIA => "VIA",
                     vendor_ids::VMWARE => "VMware",
-                    vendor_ids::QEMU => "QEMU",
+                    vendor_ids::QEMU => "Legacy QEMU",
+                    vendor_ids::REDHAT_QEMU => "QEMU",
                     vendor_ids::REDHAT => "Red Hat",
                     _ => "Unknown",
                 };
