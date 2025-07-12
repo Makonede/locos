@@ -17,6 +17,8 @@ pub mod vmm;
 
 pub mod usb;
 
+pub use usb::init;
+
 #[cfg(test)]
 pub mod tests;
 

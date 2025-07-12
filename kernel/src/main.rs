@@ -49,7 +49,7 @@ use memory::{init_frame_allocator, init_heap, init_page_allocator, paging::{self
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
 
-use crate::{pci::{device::{IoBar, MemoryBar}, PCI_MANAGER}, tasks::scheduler::kexit_task};
+use crate::{pci::{device::{IoBar, MemoryBar}, usb, PCI_MANAGER}, tasks::scheduler::kexit_task};
 
 #[cfg(not(test))]
 use meta::tprint_welcome;
@@ -146,6 +146,7 @@ unsafe extern "C" fn kernel_main() -> ! {
 
     // List all discovered PCIe devices
     list_pcie_devices();
+    usb::init();
 
     #[cfg(test)]
     {
