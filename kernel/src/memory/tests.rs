@@ -24,5 +24,3 @@ fn test_growing_vec() {
         v.push(i);
     }
 }
-
-

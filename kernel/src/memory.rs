@@ -1,5 +1,5 @@
-pub mod freelist;
 pub mod alloc;
+pub mod freelist;
 pub mod paging;
 pub mod tests;
 

@@ -12,7 +12,8 @@ use x86_64::{
 
 use crate::{
     info,
-    memory::{FRAME_ALLOCATOR, PAGE_TABLE}, pci::device::MemoryBar,
+    memory::{FRAME_ALLOCATOR, PAGE_TABLE},
+    pci::device::MemoryBar,
 };
 
 use super::PciError;
@@ -78,18 +79,23 @@ impl PcieVmm {
 
         // Round up size to page boundary
         let pages_needed = size.div_ceil(PAGE_SIZE) as usize;
-        
+
         // Find contiguous free pages
-        let start_page = self.find_free_pages(pages_needed)
+        let start_page = self
+            .find_free_pages(pages_needed)
             .ok_or(PciError::AllocationFailed)?;
 
         // Calculate virtual address
-        let virtual_address = VirtAddr::new(
-            self.base_address.as_u64() + (start_page as u64 * PAGE_SIZE)
-        );
+        let virtual_address =
+            VirtAddr::new(self.base_address.as_u64() + (start_page as u64 * PAGE_SIZE));
 
         // Map the pages
-        self.map_pages(virtual_address, physical_address, pages_needed, prefetchable)?;
+        self.map_pages(
+            virtual_address,
+            physical_address,
+            pages_needed,
+            prefetchable,
+        )?;
 
         // Mark pages as allocated
         for i in start_page..(start_page + pages_needed) {
@@ -121,7 +127,8 @@ impl PcieVmm {
     /// Unmap a previously mapped BAR
     pub fn unmap_bar(&mut self, mapped_bar: &MappedBar) -> Result<(), PciError> {
         let pages_to_unmap = mapped_bar.size.div_ceil(PAGE_SIZE) as usize;
-        let start_page = ((mapped_bar.virtual_address.as_u64() - self.base_address.as_u64()) / PAGE_SIZE) as usize;
+        let start_page = ((mapped_bar.virtual_address.as_u64() - self.base_address.as_u64())
+            / PAGE_SIZE) as usize;
 
         // Unmap the pages
         self.unmap_pages(mapped_bar.virtual_address, pages_to_unmap)?;
@@ -161,7 +168,10 @@ impl PcieVmm {
         }
 
         // Wrap around and search from the beginning
-        (0..self.next_search_start.min(PCIE_VMM_PAGES - pages_needed + 1)).find(|&start| self.is_range_free(start, pages_needed))
+        (0..self
+            .next_search_start
+            .min(PCIE_VMM_PAGES - pages_needed + 1))
+            .find(|&start| self.is_range_free(start, pages_needed))
     }
 
     /// Check if a range of pages is free
@@ -179,7 +189,10 @@ impl PcieVmm {
         if page < PCIE_VMM_PAGES {
             let word_index = page / 128;
             let bit_index = page % 128;
-            debug_assert!(word_index < BITMAP_WORDS, "Word index {word_index} out of bounds");
+            debug_assert!(
+                word_index < BITMAP_WORDS,
+                "Word index {word_index} out of bounds"
+            );
             self.page_bitmap[word_index] |= 1u128 << bit_index;
         }
     }
@@ -189,7 +202,10 @@ impl PcieVmm {
         if page < PCIE_VMM_PAGES {
             let word_index = page / 128;
             let bit_index = page % 128;
-            debug_assert!(word_index < BITMAP_WORDS, "Word index {word_index} out of bounds");
+            debug_assert!(
+                word_index < BITMAP_WORDS,
+                "Word index {word_index} out of bounds"
+            );
             self.page_bitmap[word_index] &= !(1u128 << bit_index);
         }
     }
@@ -201,7 +217,10 @@ impl PcieVmm {
         }
         let word_index = page / 128;
         let bit_index = page % 128;
-        debug_assert!(word_index < BITMAP_WORDS, "Word index {word_index} out of bounds");
+        debug_assert!(
+            word_index < BITMAP_WORDS,
+            "Word index {word_index} out of bounds"
+        );
         (self.page_bitmap[word_index] & (1u128 << bit_index)) != 0
     }
 
@@ -243,7 +262,8 @@ impl PcieVmm {
         let mut frame_allocator = FRAME_ALLOCATOR.lock();
 
         // Set appropriate page flags for device memory
-        let mut flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;
+        let mut flags =
+            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;
 
         // For prefetchable memory, we can use write-through caching
         // For non-prefetchable memory, use uncacheable
@@ -251,14 +271,16 @@ impl PcieVmm {
             flags |= PageTableFlags::NO_CACHE;
         }
 
-        if let (Some(page_table), Some(frame_allocator)) = (page_table.as_mut(), frame_allocator.as_mut()) {
+        if let (Some(page_table), Some(frame_allocator)) =
+            (page_table.as_mut(), frame_allocator.as_mut())
+        {
             for i in 0..page_count {
-                let virt_page: Page<Size4KiB> = Page::containing_address(
-                    VirtAddr::new(virtual_address.as_u64() + (i as u64 * PAGE_SIZE))
-                );
-                let phys_frame: PhysFrame<Size4KiB> = PhysFrame::containing_address(
-                    PhysAddr::new(physical_address.as_u64() + (i as u64 * PAGE_SIZE))
-                );
+                let virt_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(
+                    virtual_address.as_u64() + (i as u64 * PAGE_SIZE),
+                ));
+                let phys_frame: PhysFrame<Size4KiB> = PhysFrame::containing_address(PhysAddr::new(
+                    physical_address.as_u64() + (i as u64 * PAGE_SIZE),
+                ));
 
                 unsafe {
                     page_table
@@ -280,9 +302,9 @@ impl PcieVmm {
 
         if let Some(page_table) = page_table.as_mut() {
             for i in 0..page_count {
-                let virt_page: Page<Size4KiB> = Page::containing_address(
-                    VirtAddr::new(virtual_address.as_u64() + (i as u64 * PAGE_SIZE))
-                );
+                let virt_page: Page<Size4KiB> = Page::containing_address(VirtAddr::new(
+                    virtual_address.as_u64() + (i as u64 * PAGE_SIZE),
+                ));
 
                 let (_frame, flush) = page_table
                     .unmap(virt_page)
@@ -332,8 +354,13 @@ pub struct VmmStats {
 /// Map a BAR using the global VMM
 /// Bar MUST be a memory BAR
 pub fn map_bar(bar_info: &MemoryBar) -> Result<MappedBar, PciError> {
-    let MemoryBar { address, size, prefetchable, .. } = bar_info;
-    
+    let MemoryBar {
+        address,
+        size,
+        prefetchable,
+        ..
+    } = bar_info;
+
     let mut vmm_lock = PCIE_VMM.lock();
     let mapped = vmm_lock.map_memory_bar(*address, *size, *prefetchable)?;
     Ok(mapped)

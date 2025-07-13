@@ -1,7 +1,15 @@
 use alloc::vec::Vec;
 
-use crate::{info, warn, pci::{device::{BarInfo, PciDevice}, vmm::map_bar, PCI_MANAGER}};
 use super::xhci_registers::XhciRegisters;
+use crate::{
+    info,
+    pci::{
+        PCI_MANAGER,
+        device::{BarInfo, PciDevice},
+        vmm::map_bar,
+    },
+    warn,
+};
 
 #[allow(clippy::let_and_return)]
 pub fn find_xhci_devices() -> Vec<PciDevice> {
@@ -24,15 +32,22 @@ pub fn xhci_init() {
     let devices = find_xhci_devices();
     let primary_device = devices.first().expect("No XHCI devices found");
 
-    assert!(primary_device.supports_msix(), "XHCI device does not support MSI-X");
+    assert!(
+        primary_device.supports_msix(),
+        "XHCI device does not support MSI-X"
+    );
 
-    let memory_bar = &primary_device.bars.iter().find_map(|bar| {
-        if let BarInfo::Memory(memory_bar) = bar {
-            Some(memory_bar)
-        } else {
-            None
-        }
-    }).unwrap();
+    let memory_bar = &primary_device
+        .bars
+        .iter()
+        .find_map(|bar| {
+            if let BarInfo::Memory(memory_bar) = bar {
+                Some(memory_bar)
+            } else {
+                None
+            }
+        })
+        .unwrap();
 
     let mapped_bar = map_bar(memory_bar).unwrap();
 
@@ -41,11 +56,30 @@ pub fn xhci_init() {
 
     info!("xHCI Controller Information:");
     info!("  HCI Version: {:#x}", xhci_regs.capability().hci_version);
-    info!("  Max Device Slots: {}", xhci_regs.capability().hcs_params1.max_device_slots());
-    info!("  Max Interrupters: {}", xhci_regs.capability().hcs_params1.max_interrupters());
-    info!("  Max Ports: {}", xhci_regs.capability().hcs_params1.max_ports());
-    info!("  64-bit Addressing: {}", xhci_regs.capability().hcc_params1.ac64());
-    info!("  Context Size: {} bytes", if xhci_regs.capability().hcc_params1.csz() { 64 } else { 32 });
+    info!(
+        "  Max Device Slots: {}",
+        xhci_regs.capability().hcs_params1.max_device_slots()
+    );
+    info!(
+        "  Max Interrupters: {}",
+        xhci_regs.capability().hcs_params1.max_interrupters()
+    );
+    info!(
+        "  Max Ports: {}",
+        xhci_regs.capability().hcs_params1.max_ports()
+    );
+    info!(
+        "  64-bit Addressing: {}",
+        xhci_regs.capability().hcc_params1.ac64()
+    );
+    info!(
+        "  Context Size: {} bytes",
+        if xhci_regs.capability().hcc_params1.csz() {
+            64
+        } else {
+            32
+        }
+    );
 
     // Check if controller is halted
     let usb_sts = xhci_regs.usb_sts();
@@ -102,7 +136,11 @@ pub fn xhci_init() {
     for port in 1..=max_ports {
         let portsc = xhci_regs.port_sc(port);
         if portsc.current_connect_status() {
-            info!("Port {}: Device connected (speed: {})", port, portsc.port_speed());
+            info!(
+                "Port {}: Device connected (speed: {})",
+                port,
+                portsc.port_speed()
+            );
         } else {
             info!("Port {}: No device connected", port);
         }

@@ -13,17 +13,16 @@ use x86_64::{
 };
 
 use crate::{
-    debug, info, warn,
-    memory::{FRAME_ALLOCATOR, PAGE_TABLE},
+    debug, info,
     interrupts::apic::KernelAcpiHandler,
+    memory::{FRAME_ALLOCATOR, PAGE_TABLE},
+    warn,
 };
 
 use super::PciError;
 
 /// Virtual address space start for ECAM mappings
 const ECAM_VIRTUAL_START: u64 = 0xFFFF_F400_0000_0000;
-
-
 
 /// Enhanced Configuration Access Mechanism region
 #[derive(Debug, Clone, Copy)]
@@ -44,8 +43,13 @@ impl EcamRegion {
     /// Calculate the virtual address for a specific bus/device/function
     /// Since the entire ECAM region is mapped, this gives direct access to any device's config space
     pub fn get_device_address(&self, bus: u8, device: u8, function: u8) -> VirtAddr {
-        assert!(bus >= self.start_bus && bus <= self.end_bus,
-                "Bus {} not in range {}-{}", bus, self.start_bus, self.end_bus);
+        assert!(
+            bus >= self.start_bus && bus <= self.end_bus,
+            "Bus {} not in range {}-{}",
+            bus,
+            self.start_bus,
+            self.end_bus
+        );
         assert!(device < 32, "Device {device} out of range (0-31)");
         assert!(function < 8, "Function {function} out of range (0-7)");
 
@@ -63,12 +67,17 @@ impl EcamRegion {
     pub fn mapping_size(&self) -> u64 {
         // Ensure end_bus >= start_bus to prevent underflow
         if self.end_bus < self.start_bus {
-            warn!("Invalid ECAM region: end_bus ({}) < start_bus ({})", self.end_bus, self.start_bus);
+            warn!(
+                "Invalid ECAM region: end_bus ({}) < start_bus ({})",
+                self.end_bus, self.start_bus
+            );
             return 0;
         }
 
         // Calculate bus count safely
-        let bus_count = (self.end_bus as u64).saturating_sub(self.start_bus as u64).saturating_add(1);
+        let bus_count = (self.end_bus as u64)
+            .saturating_sub(self.start_bus as u64)
+            .saturating_add(1);
 
         // Check for potential overflow before shifting
         if bus_count > (u64::MAX >> 20) {
@@ -80,17 +89,15 @@ impl EcamRegion {
     }
 }
 
-
-
 /// Parse the ACPI MCFG table to discover ECAM regions
 pub fn parse_mcfg_table(rsdp_addr: usize) -> Result<Vec<EcamRegion>, PciError> {
     let tables = unsafe {
-        AcpiTables::from_rsdp(KernelAcpiHandler, rsdp_addr)
-            .map_err(|_| PciError::McfgNotFound)?
+        AcpiTables::from_rsdp(KernelAcpiHandler, rsdp_addr).map_err(|_| PciError::McfgNotFound)?
     };
 
     // Find the MCFG table
-    let mcfg_table = tables.find_table::<Mcfg>()
+    let mcfg_table = tables
+        .find_table::<Mcfg>()
         .map_err(|_| PciError::McfgNotFound)?;
 
     let mcfg = mcfg_table.get();
@@ -103,7 +110,10 @@ pub fn parse_mcfg_table(rsdp_addr: usize) -> Result<Vec<EcamRegion>, PciError> {
     for entry in mcfg.entries() {
         debug!(
             "MCFG entry: base={:#x}, segment={}, buses={}-{}",
-            entry.base_address, entry.pci_segment_group, entry.bus_number_start, entry.bus_number_end
+            entry.base_address,
+            entry.pci_segment_group,
+            entry.bus_number_start,
+            entry.bus_number_end
         );
 
         // Validate the ECAM entry
@@ -147,7 +157,9 @@ pub fn device_exists_in_regions(regions: &[EcamRegion], bus: u8, device: u8, fun
 
 /// Get the ECAM region that contains a specific bus
 pub fn find_region_for_bus(regions: &[EcamRegion], bus: u8) -> Option<&EcamRegion> {
-    regions.iter().find(|region| bus >= region.start_bus && bus <= region.end_bus)
+    regions
+        .iter()
+        .find(|region| bus >= region.start_bus && bus <= region.end_bus)
 }
 
 /// Calculate total memory usage for all ECAM regions
@@ -179,7 +191,9 @@ pub fn validate_ecam_region(region: &EcamRegion) -> Result<(), &'static str> {
         return Err("virtual_address not set");
     }
 
-    let bus_count = (region.end_bus as u64).saturating_sub(region.start_bus as u64).saturating_add(1);
+    let bus_count = (region.end_bus as u64)
+        .saturating_sub(region.start_bus as u64)
+        .saturating_add(1);
     if bus_count > 256 {
         return Err("too many buses (>256)");
     }
@@ -217,9 +231,13 @@ pub fn map_ecam_region(region: &mut EcamRegion) -> Result<(), PciError> {
     let pages_needed = mapping_size.div_ceil(0x1000);
 
     // Check for reasonable page count to prevent excessive memory usage
-    if pages_needed > 1024 * 1024 {  // Limit to 4GB of mapping
-        warn!("ECAM region requires {} pages ({}GB), this seems excessive",
-              pages_needed, pages_needed >> 18);
+    if pages_needed > 1024 * 1024 {
+        // Limit to 4GB of mapping
+        warn!(
+            "ECAM region requires {} pages ({}GB), this seems excessive",
+            pages_needed,
+            pages_needed >> 18
+        );
         return Err(PciError::EcamMappingFailed);
     }
 
@@ -243,7 +261,10 @@ pub fn map_ecam_region(region: &mut EcamRegion) -> Result<(), PciError> {
 
         info!(
             "Mapping entire ECAM region: phys={:#x} -> virt={:#x}, size={:#x} ({} pages)",
-            region.base_address.as_u64(), region.virtual_address.as_u64(), mapping_size, pages_needed
+            region.base_address.as_u64(),
+            region.virtual_address.as_u64(),
+            mapping_size,
+            pages_needed
         );
 
         for page_offset in 0..pages_needed {
@@ -267,7 +288,9 @@ pub fn map_ecam_region(region: &mut EcamRegion) -> Result<(), PciError> {
 
     info!(
         "Successfully mapped ECAM region: buses {}-{}, {} MB of config space",
-        region.start_bus, region.end_bus, mapping_size >> 20
+        region.start_bus,
+        region.end_bus,
+        mapping_size >> 20
     );
 
     Ok(())
@@ -276,7 +299,10 @@ pub fn map_ecam_region(region: &mut EcamRegion) -> Result<(), PciError> {
 /// Read a 32-bit value from PCIe configuration space
 /// Returns the value read from the virtual address mapped configuration space
 pub fn read_config_u32(region: &EcamRegion, bus: u8, device: u8, function: u8, offset: u16) -> u32 {
-    assert!(offset % 4 == 0, "Config space offset must be 4-byte aligned");
+    assert!(
+        offset % 4 == 0,
+        "Config space offset must be 4-byte aligned"
+    );
     assert!(offset < 4096, "Config space offset out of range");
 
     let device_base = region.get_device_address(bus, device, function);
@@ -287,8 +313,18 @@ pub fn read_config_u32(region: &EcamRegion, bus: u8, device: u8, function: u8, o
 
 /// Write a 32-bit value to PCIe configuration space
 /// Writes to the virtual address mapped configuration space
-pub fn write_config_u32(region: &EcamRegion, bus: u8, device: u8, function: u8, offset: u16, value: u32) {
-    assert!(offset % 4 == 0, "Config space offset must be 4-byte aligned");
+pub fn write_config_u32(
+    region: &EcamRegion,
+    bus: u8,
+    device: u8,
+    function: u8,
+    offset: u16,
+    value: u32,
+) {
+    assert!(
+        offset % 4 == 0,
+        "Config space offset must be 4-byte aligned"
+    );
     assert!(offset < 4096, "Config space offset out of range");
 
     let device_base = region.get_device_address(bus, device, function);
@@ -299,7 +335,10 @@ pub fn write_config_u32(region: &EcamRegion, bus: u8, device: u8, function: u8, 
 
 /// Read a 16-bit value from PCIe configuration space
 pub fn read_config_u16(region: &EcamRegion, bus: u8, device: u8, function: u8, offset: u16) -> u16 {
-    assert!(offset % 2 == 0, "Config space offset must be 2-byte aligned");
+    assert!(
+        offset % 2 == 0,
+        "Config space offset must be 2-byte aligned"
+    );
     assert!(offset < 4096, "Config space offset out of range");
 
     let device_base = region.get_device_address(bus, device, function);
@@ -309,8 +348,18 @@ pub fn read_config_u16(region: &EcamRegion, bus: u8, device: u8, function: u8, o
 }
 
 /// Write a 16-bit value to PCIe configuration space
-pub fn write_config_u16(region: &EcamRegion, bus: u8, device: u8, function: u8, offset: u16, value: u16) {
-    assert!(offset % 2 == 0, "Config space offset must be 2-byte aligned");
+pub fn write_config_u16(
+    region: &EcamRegion,
+    bus: u8,
+    device: u8,
+    function: u8,
+    offset: u16,
+    value: u16,
+) {
+    assert!(
+        offset % 2 == 0,
+        "Config space offset must be 2-byte aligned"
+    );
     assert!(offset < 4096, "Config space offset out of range");
 
     let device_base = region.get_device_address(bus, device, function);
@@ -330,7 +379,14 @@ pub fn read_config_u8(region: &EcamRegion, bus: u8, device: u8, function: u8, of
 }
 
 /// Write an 8-bit value to PCIe configuration space
-pub fn write_config_u8(region: &EcamRegion, bus: u8, device: u8, function: u8, offset: u16, value: u8) {
+pub fn write_config_u8(
+    region: &EcamRegion,
+    bus: u8,
+    device: u8,
+    function: u8,
+    offset: u16,
+    value: u8,
+) {
     assert!(offset < 4096, "Config space offset out of range");
 
     let device_base = region.get_device_address(bus, device, function);

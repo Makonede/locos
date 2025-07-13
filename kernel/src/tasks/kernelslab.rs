@@ -3,11 +3,16 @@ use core::ptr::NonNull;
 use spin::Mutex;
 use x86_64::{
     VirtAddr,
-    structures::paging::{FrameAllocator, FrameDeallocator, Mapper, Page, PageTableFlags, Size4KiB},
+    structures::paging::{
+        FrameAllocator, FrameDeallocator, Mapper, Page, PageTableFlags, Size4KiB,
+    },
 };
 
 use crate::{
-    debug, memory::{FRAME_ALLOCATOR, PAGE_TABLE}, tasks::scheduler::KSTACK_SIZE, trace
+    debug,
+    memory::{FRAME_ALLOCATOR, PAGE_TABLE},
+    tasks::scheduler::KSTACK_SIZE,
+    trace,
 };
 
 pub static STACK_ALLOCATOR: Mutex<KernelSlabAlloc> = Mutex::new(KernelSlabAlloc::new());
@@ -51,7 +56,9 @@ impl KernelSlabAlloc {
         let page_table_lock = page_table_guard.as_mut().unwrap();
 
         // Map stack pages (skip the first page as guard page)
-        for page_addr in (block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000)).step_by(0x1000) {
+        for page_addr in
+            (block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000)).step_by(0x1000)
+        {
             unsafe {
                 trace!("mapping page at {:#X}", page_addr);
                 let frame = FRAME_ALLOCATOR
@@ -90,11 +97,13 @@ impl KernelSlabAlloc {
         let mapper = page_table.as_mut().unwrap();
 
         // Unmap stack pages (skip guard page at offset 0)
-        for page_addr in (block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000)).step_by(0x1000) {
+        for page_addr in
+            (block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000)).step_by(0x1000)
+        {
             unsafe {
-                if let Ok((frame, flush)) =
-                    mapper.unmap(Page::<Size4KiB>::containing_address(VirtAddr::new(page_addr)))
-                {
+                if let Ok((frame, flush)) = mapper.unmap(Page::<Size4KiB>::containing_address(
+                    VirtAddr::new(page_addr),
+                )) {
                     flush.flush();
                     FRAME_ALLOCATOR
                         .lock()

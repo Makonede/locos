@@ -2,11 +2,19 @@ use core::{arch::naked_asm, ptr::NonNull};
 
 use alloc::collections::vec_deque::VecDeque;
 use spin::Mutex;
-use x86_64::{instructions::interrupts::{self}, registers::{
-    control::Cr3, rflags::{self}, segmentation::{Segment, CS, SS}
-}, structures::paging::PhysFrame};
+use x86_64::{
+    instructions::interrupts::{self},
+    registers::{
+        control::Cr3,
+        rflags::{self},
+        segmentation::{CS, SS, Segment},
+    },
+    structures::paging::PhysFrame,
+};
 
-use crate::{debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR, trace};
+use crate::{
+    debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR, trace,
+};
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 
@@ -14,7 +22,7 @@ static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 pub const KSTACK_SIZE: u8 = 4;
 
 /// adds the current kernel task to a pcb
-/// 
+///
 /// this task should never finish
 pub fn kinit_multitasking() {
     let current_regs = TaskRegisters {
@@ -39,18 +47,20 @@ pub fn kinit_multitasking() {
         interrupt_rsp: 0,
         interrupt_ss: SS::get_reg().0 as u64,
     };
-        
+
     let mut scheduler = TASK_SCHEDULER.lock();
     let current_task = ProcessControlBlock {
         task_type: TaskType::Kernel,
         regs: current_regs,
-        state: TaskState::Running,  // Mark as currently running
-        stack_start: NonNull::dangling(),  // Kernel uses its own stack
+        state: TaskState::Running,        // Mark as currently running
+        stack_start: NonNull::dangling(), // Kernel uses its own stack
         cr3: Cr3::read().0,
     };
     scheduler.task_list.push_front(current_task);
-    debug!("Added current kernel task to scheduler with RIP: {:#x}, RSP: {:#x}", 
-           current_regs.interrupt_rip, current_regs.interrupt_rsp);
+    debug!(
+        "Added current kernel task to scheduler with RIP: {:#x}, RSP: {:#x}",
+        current_regs.interrupt_rip, current_regs.interrupt_rsp
+    );
 }
 
 /// adds a new kernel task to the scheduler
@@ -97,7 +107,7 @@ pub fn kcreate_task(task_ptr: fn() -> !, name: &str) {
 }
 
 /// Exits a task
-/// 
+///
 /// should be called at the end of every running kernel task when it wants to terminate
 #[inline]
 pub fn kexit_task() -> ! {
@@ -187,7 +197,7 @@ struct TaskRegisters {
 }
 
 /// switch to a task
-/// 
+///
 /// # Safety
 /// what do you think might be unsafe about this
 #[unsafe(naked)]
@@ -243,7 +253,7 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
 
     // save current task context first
     let mut current_task = scheduler.task_list.pop_front().unwrap();
-    
+
     if current_task.state == TaskState::Terminated {
         trace!("task ended at {:#X}", current_task.regs.interrupt_rsp);
     } else {
@@ -253,16 +263,19 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
         scheduler.task_list.push_back(current_task);
         trace!("task paused at {:#X}", current_task.regs.interrupt_rsp);
 
-        trace!("{:#X}", scheduler.task_list.front_mut().unwrap().regs.interrupt_rsp);
+        trace!(
+            "{:#X}",
+            scheduler.task_list.front_mut().unwrap().regs.interrupt_rsp
+        );
     }
 
     // run front task
     let next_task = scheduler.task_list.front_mut().unwrap();
-    
+
     #[cfg(test)]
     {
         if current_task == *next_task {
-            use crate::testing::{exit_qemu, QemuExitCode};
+            use crate::testing::{QemuExitCode, exit_qemu};
             exit_qemu(QemuExitCode::Success);
         }
     }

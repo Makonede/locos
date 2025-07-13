@@ -100,7 +100,8 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
     let mut final_lapic = lapic.build().unwrap();
 
     unsafe {
-        (&mut (*IDT.as_mut_ptr()))[LAPIC_TIMER_VECTOR].set_handler_addr(VirtAddr::new(schedule as usize as u64));
+        (&mut (*IDT.as_mut_ptr()))[LAPIC_TIMER_VECTOR]
+            .set_handler_addr(VirtAddr::new(schedule as usize as u64));
         (&mut (*IDT.as_mut_ptr()))[LAPIC_ERROR_VECTOR].set_handler_fn(lapic_error_handler);
         (&mut (*IDT.as_mut_ptr()))[LAPIC_SPURIOUS_VECTOR].set_handler_fn(spurious_handler);
     }

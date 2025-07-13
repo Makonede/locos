@@ -164,17 +164,17 @@ pub mod bar_types {
     pub const MEMORY_TYPE_32BIT: u32 = 0x0;
     pub const MEMORY_TYPE_1MB: u32 = 0x2;
     pub const MEMORY_TYPE_64BIT: u32 = 0x4;
-    
+
     /// Memory BAR prefetchable bit (bit 3)
     pub const MEMORY_PREFETCHABLE: u32 = 0x8;
-    
+
     /// BAR type bit (bit 0)
     pub const BAR_TYPE_MEMORY: u32 = 0x0;
     pub const BAR_TYPE_IO: u32 = 0x1;
-    
+
     /// Memory BAR address mask
     pub const MEMORY_BAR_MASK: u32 = 0xFFFFFFF0;
-    
+
     /// I/O BAR address mask
     pub const IO_BAR_MASK: u32 = 0xFFFFFFFC;
 }
@@ -186,12 +186,12 @@ pub mod msi_offsets {
     pub const MESSAGE_CONTROL: u16 = 0x02;
     pub const MESSAGE_ADDRESS_LOW: u16 = 0x04;
     pub const MESSAGE_ADDRESS_HIGH: u16 = 0x08; // Only present if 64-bit capable
-    pub const MESSAGE_DATA_32: u16 = 0x08;      // For 32-bit MSI
-    pub const MESSAGE_DATA_64: u16 = 0x0C;      // For 64-bit MSI
-    pub const MASK_BITS_32: u16 = 0x0C;         // For 32-bit MSI with per-vector masking
-    pub const MASK_BITS_64: u16 = 0x10;         // For 64-bit MSI with per-vector masking
-    pub const PENDING_BITS_32: u16 = 0x10;      // For 32-bit MSI with per-vector masking
-    pub const PENDING_BITS_64: u16 = 0x14;      // For 64-bit MSI with per-vector masking
+    pub const MESSAGE_DATA_32: u16 = 0x08; // For 32-bit MSI
+    pub const MESSAGE_DATA_64: u16 = 0x0C; // For 64-bit MSI
+    pub const MASK_BITS_32: u16 = 0x0C; // For 32-bit MSI with per-vector masking
+    pub const MASK_BITS_64: u16 = 0x10; // For 64-bit MSI with per-vector masking
+    pub const PENDING_BITS_32: u16 = 0x10; // For 32-bit MSI with per-vector masking
+    pub const PENDING_BITS_64: u16 = 0x14; // For 64-bit MSI with per-vector masking
 }
 
 /// MSI-X capability structure offsets
@@ -231,7 +231,7 @@ pub struct MsiXTableEntry {
 
 impl MsiXTableEntry {
     pub const VECTOR_MASKED: u32 = 1 << 0;
-    
+
     pub fn new() -> Self {
         Self {
             message_address_low: 0,
@@ -240,24 +240,24 @@ impl MsiXTableEntry {
             vector_control: Self::VECTOR_MASKED,
         }
     }
-    
+
     pub fn set_address(&mut self, address: u64) {
         self.message_address_low = address as u32;
         self.message_address_high = (address >> 32) as u32;
     }
-    
+
     pub fn set_data(&mut self, data: u32) {
         self.message_data = data;
     }
-    
+
     pub fn mask(&mut self) {
         self.vector_control |= Self::VECTOR_MASKED;
     }
-    
+
     pub fn unmask(&mut self) {
         self.vector_control &= !Self::VECTOR_MASKED;
     }
-    
+
     pub fn is_masked(&self) -> bool {
         (self.vector_control & Self::VECTOR_MASKED) != 0
     }

@@ -8,18 +8,16 @@
 
 use alloc::vec::Vec;
 
-use crate::{
-    info, warn,
-};
+use crate::{info, warn};
 
 use super::{
+    PciError,
+    config::{
+        MsiXTableEntry, capability_ids, msi_control_bits, msi_offsets, msix_control_bits,
+        msix_offsets,
+    },
     device::PciDevice,
     mcfg::{read_config_u16, read_config_u32, write_config_u16, write_config_u32},
-    config::{
-        capability_ids, msi_offsets, msix_offsets, msi_control_bits, msix_control_bits,
-        MsiXTableEntry,
-    },
-    PciError,
 };
 
 /// MSI-X virtual address space start
@@ -86,9 +84,16 @@ pub struct MsiXVector {
 impl MsiInfo {
     /// Create MSI information from a device capability
     pub fn from_device(device: &PciDevice, cap_offset: u16) -> Result<Self, PciError> {
-        let control = read_config_u16(&device.ecam_region, device.bus, device.device, device.function, cap_offset + msi_offsets::MESSAGE_CONTROL);
-        
-        let vectors_supported = 1 << ((control & msi_control_bits::MULTIPLE_MESSAGE_CAPABLE_MASK) >> 1);
+        let control = read_config_u16(
+            &device.ecam_region,
+            device.bus,
+            device.device,
+            device.function,
+            cap_offset + msi_offsets::MESSAGE_CONTROL,
+        );
+
+        let vectors_supported =
+            1 << ((control & msi_control_bits::MULTIPLE_MESSAGE_CAPABLE_MASK) >> 1);
         let is_64bit = (control & msi_control_bits::ADDRESS_64_CAPABLE) != 0;
         let per_vector_masking = (control & msi_control_bits::PER_VECTOR_MASKING_CAPABLE) != 0;
 
@@ -135,7 +140,7 @@ impl MsiInfo {
                 self.cap_offset + msi_offsets::MESSAGE_ADDRESS_HIGH,
                 (msi_address >> 32) as u32,
             );
-            
+
             write_config_u32(
                 &self.device.ecam_region,
                 self.device.bus,
@@ -166,8 +171,9 @@ impl MsiInfo {
 
         // Set number of enabled vectors
         control &= !msi_control_bits::MULTIPLE_MESSAGE_ENABLE_MASK;
-        control |= ((num_vectors.trailing_zeros() as u16) << 4) & msi_control_bits::MULTIPLE_MESSAGE_ENABLE_MASK;
-        
+        control |= ((num_vectors.trailing_zeros() as u16) << 4)
+            & msi_control_bits::MULTIPLE_MESSAGE_ENABLE_MASK;
+
         // Enable MSI
         control |= msi_control_bits::MSI_ENABLE;
 
@@ -182,8 +188,7 @@ impl MsiInfo {
 
         info!(
             "Enabled MSI for device {:02x}:{:02x}.{}: {} vectors starting at {}",
-            self.device.bus, self.device.device, self.device.function,
-            num_vectors, base_vector
+            self.device.bus, self.device.device, self.device.function, num_vectors, base_vector
         );
 
         Ok(())
@@ -220,9 +225,27 @@ impl MsiInfo {
 impl MsiXInfo {
     /// Create MSI-X information from a device capability
     pub fn from_device(device: &PciDevice, cap_offset: u16) -> Result<Self, PciError> {
-        let control = read_config_u16(&device.ecam_region, device.bus, device.device, device.function, cap_offset + msix_offsets::MESSAGE_CONTROL);
-        let table_offset_bir = read_config_u32(&device.ecam_region, device.bus, device.device, device.function, cap_offset + msix_offsets::TABLE_OFFSET_BIR);
-        let pba_offset_bir = read_config_u32(&device.ecam_region, device.bus, device.device, device.function, cap_offset + msix_offsets::PBA_OFFSET_BIR);
+        let control = read_config_u16(
+            &device.ecam_region,
+            device.bus,
+            device.device,
+            device.function,
+            cap_offset + msix_offsets::MESSAGE_CONTROL,
+        );
+        let table_offset_bir = read_config_u32(
+            &device.ecam_region,
+            device.bus,
+            device.device,
+            device.function,
+            cap_offset + msix_offsets::TABLE_OFFSET_BIR,
+        );
+        let pba_offset_bir = read_config_u32(
+            &device.ecam_region,
+            device.bus,
+            device.device,
+            device.function,
+            cap_offset + msix_offsets::PBA_OFFSET_BIR,
+        );
 
         let table_size = (control & msix_control_bits::TABLE_SIZE_MASK) + 1;
         let table_bar = (table_offset_bir & 0x7) as u8;
@@ -253,7 +276,9 @@ impl MsiXInfo {
         self.map_device_bars()?;
 
         // Get the BAR that contains the MSI-X table and find its virtual mapping
-        if let Some(super::device::BarInfo::Memory(memory_bar)) = self.device.bars.get(self.table_bar as usize) {
+        if let Some(super::device::BarInfo::Memory(memory_bar)) =
+            self.device.bars.get(self.table_bar as usize)
+        {
             if memory_bar.address.as_u64() == 0 {
                 warn!("MSI-X table BAR {} not assigned by UEFI", self.table_bar);
                 return Err(PciError::MsiXSetupFailed);
@@ -278,7 +303,9 @@ impl MsiXInfo {
         }
 
         // Get the BAR that contains the PBA and find its virtual mapping
-        if let Some(super::device::BarInfo::Memory(memory_bar)) = self.device.bars.get(self.pba_bar as usize) {
+        if let Some(super::device::BarInfo::Memory(memory_bar)) =
+            self.device.bars.get(self.pba_bar as usize)
+        {
             if memory_bar.address.as_u64() == 0 {
                 warn!("MSI-X PBA BAR {} not assigned by UEFI", self.pba_bar);
                 return Err(PciError::MsiXSetupFailed);
@@ -317,19 +344,21 @@ impl MsiXInfo {
             mapped_bars: &mut Vec<super::vmm::MappedBar>,
         ) -> Result<(), PciError> {
             // Check if this BAR is already mapped by this MSI-X instance
-            let already_mapped = mapped_bars.iter().any(|mapped|
-                mapped.physical_address == address
-            );
+            let already_mapped = mapped_bars
+                .iter()
+                .any(|mapped| mapped.physical_address == address);
 
             if !already_mapped {
                 // Try to map the BAR - vmm::map_bar handles global deduplication
                 match vmm::map_bar(memory_bar) {
                     Ok(mapped) => {
-                        info!("MSI-X mapped BAR: phys={:#x} -> virt={:#x}",
-                              mapped.physical_address.as_u64(),
-                              mapped.virtual_address.as_u64());
+                        info!(
+                            "MSI-X mapped BAR: phys={:#x} -> virt={:#x}",
+                            mapped.physical_address.as_u64(),
+                            mapped.virtual_address.as_u64()
+                        );
                         mapped_bars.push(mapped);
-                    },
+                    }
                     Err(e) => {
                         // If mapping fails, it might already be mapped globally
                         // Try to find existing mapping in global VMM
@@ -346,9 +375,10 @@ impl MsiXInfo {
 
         for bar in self.device.bars.iter() {
             if let super::device::BarInfo::Memory(memory_bar) = bar
-                && memory_bar.address.as_u64() != 0 {
-                    try_map_memory_bar(memory_bar, memory_bar.address, &mut self.mapped_bars)?;
-                }
+                && memory_bar.address.as_u64() != 0
+            {
+                try_map_memory_bar(memory_bar, memory_bar.address, &mut self.mapped_bars)?;
+            }
         }
         Ok(())
     }
@@ -356,15 +386,16 @@ impl MsiXInfo {
     /// Find the virtual address for a specific BAR index
     fn find_bar_virtual_address(&self, bar_index: u8) -> Result<u64, PciError> {
         if let Some(bar_info) = self.device.bars.get(bar_index as usize)
-            && let super::device::BarInfo::Memory(memory_bar) = bar_info {
-                // Find the corresponding mapped BAR
-                for mapped in &self.mapped_bars {
-                    if mapped.physical_address == memory_bar.address {
-                        return Ok(mapped.virtual_address.as_u64());
-                    }
+            && let super::device::BarInfo::Memory(memory_bar) = bar_info
+        {
+            // Find the corresponding mapped BAR
+            for mapped in &self.mapped_bars {
+                if mapped.physical_address == memory_bar.address {
+                    return Ok(mapped.virtual_address.as_u64());
                 }
-                return Err(PciError::MsiXSetupFailed);
             }
+            return Err(PciError::MsiXSetupFailed);
+        }
         Err(PciError::InvalidDevice)
     }
 
@@ -390,16 +421,17 @@ impl MsiXInfo {
         // Configure each vector in the table
         if let Some(table_addr) = self.table_virtual_addr {
             for vector in &self.vectors {
-                let entry_addr = table_addr + (vector.index as u64 * core::mem::size_of::<MsiXTableEntry>() as u64);
+                let entry_addr = table_addr
+                    + (vector.index as u64 * core::mem::size_of::<MsiXTableEntry>() as u64);
                 let mut entry = MsiXTableEntry::new();
-                
+
                 let msi_address = calculate_msi_address(0); // CPU 0 for now
                 let msi_data = calculate_msi_data(vector.vector);
-                
+
                 entry.set_address(msi_address);
                 entry.set_data(msi_data);
                 entry.mask(); // Start masked
-                
+
                 unsafe {
                     core::ptr::write_volatile(entry_addr as *mut MsiXTableEntry, entry);
                 }
@@ -471,16 +503,17 @@ impl MsiXInfo {
     pub fn enable_vector(&mut self, index: u16) -> Result<(), PciError> {
         if let Some(vector) = self.vectors.iter_mut().find(|v| v.index == index) {
             vector.enabled = true;
-            
+
             if let Some(table_addr) = self.table_virtual_addr {
-                let entry_addr = table_addr + (index as u64 * core::mem::size_of::<MsiXTableEntry>() as u64);
+                let entry_addr =
+                    table_addr + (index as u64 * core::mem::size_of::<MsiXTableEntry>() as u64);
                 unsafe {
                     let mut entry = core::ptr::read_volatile(entry_addr as *const MsiXTableEntry);
                     entry.unmask();
                     core::ptr::write_volatile(entry_addr as *mut MsiXTableEntry, entry);
                 }
             }
-            
+
             Ok(())
         } else {
             Err(PciError::InvalidDevice)
@@ -491,16 +524,17 @@ impl MsiXInfo {
     pub fn disable_vector(&mut self, index: u16) -> Result<(), PciError> {
         if let Some(vector) = self.vectors.iter_mut().find(|v| v.index == index) {
             vector.enabled = false;
-            
+
             if let Some(table_addr) = self.table_virtual_addr {
-                let entry_addr = table_addr + (index as u64 * core::mem::size_of::<MsiXTableEntry>() as u64);
+                let entry_addr =
+                    table_addr + (index as u64 * core::mem::size_of::<MsiXTableEntry>() as u64);
                 unsafe {
                     let mut entry = core::ptr::read_volatile(entry_addr as *const MsiXTableEntry);
                     entry.mask();
                     core::ptr::write_volatile(entry_addr as *mut MsiXTableEntry, entry);
                 }
             }
-            
+
             Ok(())
         } else {
             Err(PciError::InvalidDevice)
@@ -517,7 +551,7 @@ fn calculate_msi_address(cpu_id: u8) -> u64 {
     // Bits 3: Redirection Hint (0 = directed, 1 = lowest priority)
     // Bits 2: Destination Mode (0 = physical, 1 = logical)
     // Bits 1-0: Reserved (00)
-    
+
     0xFEE00000 | ((cpu_id as u64) << 12)
 }
 
@@ -530,30 +564,40 @@ fn calculate_msi_data(vector: u8) -> u32 {
     // Bits 13-11: Reserved (000)
     // Bits 10-8: Delivery Mode (000 = fixed, 001 = lowest priority, etc.)
     // Bits 7-0: Vector
-    
+
     vector as u32 // Edge-triggered, fixed delivery mode
 }
 
 /// Setup MSI for a device
-pub fn setup_msi(device: &PciDevice, num_vectors: u8, base_vector: u8) -> Result<MsiInfo, PciError> {
-    let cap = device.find_capability(capability_ids::MSI)
+pub fn setup_msi(
+    device: &PciDevice,
+    num_vectors: u8,
+    base_vector: u8,
+) -> Result<MsiInfo, PciError> {
+    let cap = device
+        .find_capability(capability_ids::MSI)
         .ok_or(PciError::MsiXSetupFailed)?;
-    
+
     let mut msi_info = MsiInfo::from_device(device, cap as u16)?;
     msi_info.enable(base_vector, num_vectors)?;
-    
+
     Ok(msi_info)
 }
 
 /// Setup MSI-X for a device
-pub fn setup_msix(device: &PciDevice, num_vectors: u16, base_vector: u8) -> Result<MsiXInfo, PciError> {
-    let cap = device.find_capability(capability_ids::MSI_X)
+pub fn setup_msix(
+    device: &PciDevice,
+    num_vectors: u16,
+    base_vector: u8,
+) -> Result<MsiXInfo, PciError> {
+    let cap = device
+        .find_capability(capability_ids::MSI_X)
         .ok_or(PciError::MsiXSetupFailed)?;
-    
+
     let mut msix_info = MsiXInfo::from_device(device, cap as u16)?;
     msix_info.map_structures()?;
     msix_info.allocate_vectors(num_vectors, base_vector)?;
     msix_info.enable()?;
-    
+
     Ok(msix_info)
 }

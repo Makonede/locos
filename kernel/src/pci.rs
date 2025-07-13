@@ -25,7 +25,14 @@ pub mod tests;
 use alloc::vec::Vec;
 use spin::Mutex;
 
-use crate::{info, pci::{device::{IoBar, MemoryBar}, vmm::PCIE_VMM}, warn};
+use crate::{
+    info,
+    pci::{
+        device::{IoBar, MemoryBar},
+        vmm::PCIE_VMM,
+    },
+    warn,
+};
 
 /// Global PCIe manager instance
 pub static PCI_MANAGER: Mutex<Option<PciManager>> = Mutex::new(None);
@@ -98,11 +105,14 @@ impl PciManager {
     fn enumerate_bus(&mut self, ecam_region: &mcfg::EcamRegion, bus: u8) -> Result<(), PciError> {
         for device in 0..32 {
             for function in 0..8 {
-                if let Some(pci_device) = device::probe_device(ecam_region, bus, device, function)? {
+                if let Some(pci_device) = device::probe_device(ecam_region, bus, device, function)?
+                {
                     self.devices.push(pci_device);
-                    
+
                     // If this is function 0 and not a multi-function device, skip other functions
-                    if function == 0 && !device::is_multifunction_device(ecam_region, bus, device, 0)? {
+                    if function == 0
+                        && !device::is_multifunction_device(ecam_region, bus, device, 0)?
+                    {
                         break;
                     }
                 }
@@ -113,14 +123,17 @@ impl PciManager {
 
     /// Find a device by vendor and device ID
     pub fn find_device(&self, vendor_id: u16, device_id: u16) -> Option<&device::PciDevice> {
-        self.devices.iter().find(|dev| {
-            dev.vendor_id == vendor_id && dev.device_id == device_id
-        })
+        self.devices
+            .iter()
+            .find(|dev| dev.vendor_id == vendor_id && dev.device_id == device_id)
     }
 
     /// Get all devices of a specific class
     pub fn get_devices_by_class(&self, class_code: u8) -> Vec<&device::PciDevice> {
-        self.devices.iter().filter(|dev| dev.class_code == class_code).collect()
+        self.devices
+            .iter()
+            .filter(|dev| dev.class_code == class_code)
+            .collect()
     }
 
     /// Check BAR assignment status for all devices
@@ -133,43 +146,66 @@ impl PciManager {
                 match bar {
                     device::BarInfo::Memory(MemoryBar { address, size, .. }) => {
                         if address.as_u64() == 0 {
-                            warn!("Device {:02x}:{:02x}.{} BAR{}: Memory BAR not assigned by UEFI (size={}KB)",
-                                  device.bus, device.device, device.function, i, size >> 10);
+                            warn!(
+                                "Device {:02x}:{:02x}.{} BAR{}: Memory BAR not assigned by UEFI (size={}KB)",
+                                device.bus,
+                                device.device,
+                                device.function,
+                                i,
+                                size >> 10
+                            );
                             unassigned_count += 1;
                         } else if *size == 0 {
-                            warn!("Device {:02x}:{:02x}.{} BAR{}: Memory BAR has zero size at {:#x}",
-                                  device.bus, device.device, device.function, i, address.as_u64());
+                            warn!(
+                                "Device {:02x}:{:02x}.{} BAR{}: Memory BAR has zero size at {:#x}",
+                                device.bus,
+                                device.device,
+                                device.function,
+                                i,
+                                address.as_u64()
+                            );
                         } else {
                             assigned_count += 1;
                         }
-                    },
+                    }
                     device::BarInfo::Io(IoBar { address, size }) => {
                         if *address == 0 {
-                            warn!("Device {:02x}:{:02x}.{} BAR{}: I/O BAR not assigned by UEFI (size={}B)",
-                                  device.bus, device.device, device.function, i, size);
+                            warn!(
+                                "Device {:02x}:{:02x}.{} BAR{}: I/O BAR not assigned by UEFI (size={}B)",
+                                device.bus, device.device, device.function, i, size
+                            );
                             unassigned_count += 1;
                         } else {
                             assigned_count += 1;
                         }
-                    },
-                    device::BarInfo::Unused => {},
+                    }
+                    device::BarInfo::Unused => {}
                 }
             }
         }
 
-        info!("BAR assignment check: {} assigned, {} unassigned",
-              assigned_count, unassigned_count);
+        info!(
+            "BAR assignment check: {} assigned, {} unassigned",
+            assigned_count, unassigned_count
+        );
 
         if unassigned_count > 0 {
-            warn!("{} BARs were not assigned addresses by UEFI!", unassigned_count);
+            warn!(
+                "{} BARs were not assigned addresses by UEFI!",
+                unassigned_count
+            );
         }
 
         // Print VMM statistics
         let vmm_lock = PCIE_VMM.lock();
         let stats = vmm_lock.get_stats();
-        info!("PCIe VMM initialized: {}/{} pages available ({}MB/{}MB)",
-              stats.free_pages, stats.total_pages,
-              stats.free_size >> 20, stats.total_size >> 20);
+        info!(
+            "PCIe VMM initialized: {}/{} pages available ({}MB/{}MB)",
+            stats.free_pages,
+            stats.total_pages,
+            stats.free_size >> 20,
+            stats.total_size >> 20
+        );
     }
 }
 
@@ -192,11 +228,10 @@ pub enum PciError {
 pub fn init_pci(rsdp_addr: usize) -> Result<(), PciError> {
     let mut manager = PciManager::new();
     manager.init(rsdp_addr)?;
-    
+
     let mut pci_lock = PCI_MANAGER.lock();
     *pci_lock = Some(manager);
-    
+
     info!("PCIe subsystem initialized successfully");
     Ok(())
 }
-

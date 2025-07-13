@@ -36,27 +36,40 @@ extern crate alloc;
 
 use core::{arch::asm, panic::PanicInfo};
 
-use alloc::{vec::Vec, format};
+use alloc::{format, vec::Vec};
 use gdt::init_gdt;
 use interrupts::{init_idt, setup_apic};
 use limine::{
-    memory_map::EntryType, request::{
+    BaseRevision,
+    memory_map::EntryType,
+    request::{
         FramebufferRequest, HhdmRequest, MemoryMapRequest, RequestsEndMarker, RequestsStartMarker,
         RsdpRequest, StackSizeRequest,
-    }, BaseRevision
+    },
 };
-use memory::{init_frame_allocator, init_heap, init_page_allocator, paging::{self, fill_page_list}};
+use memory::{
+    init_frame_allocator, init_heap, init_page_allocator,
+    paging::{self, fill_page_list},
+};
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
 
-use crate::{pci::{device::{IoBar, MemoryBar}, usb, PCI_MANAGER}, tasks::scheduler::kexit_task};
+use crate::{
+    pci::{
+        PCI_MANAGER,
+        device::{IoBar, MemoryBar},
+        usb,
+    },
+    tasks::scheduler::kexit_task,
+};
 
+#[cfg(not(test))]
+use crate::{
+    interrupts::apic::LAPIC_TIMER_VECTOR,
+    tasks::scheduler::{kcreate_task, kinit_multitasking},
+};
 #[cfg(not(test))]
 use meta::tprint_welcome;
-#[cfg(not(test))]
-use crate::{interrupts::apic::LAPIC_TIMER_VECTOR, tasks::scheduler::{kcreate_task, kinit_multitasking}};
-
-
 
 pub const STACK_SIZE: u64 = 0x100000;
 
@@ -80,7 +93,9 @@ unsafe extern "C" fn kernel_main() -> ! {
     for entry in memory_regions {
         debug!(
             "Memory region: base = {:#x} - {:#x}, usable = {:?}",
-            entry.base + physical_memory_offset, entry.base + physical_memory_offset + entry.length, entry.entry_type == EntryType::USABLE,
+            entry.base + physical_memory_offset,
+            entry.base + physical_memory_offset + entry.length,
+            entry.entry_type == EntryType::USABLE,
         );
     }
 
@@ -194,7 +209,10 @@ fn list_pcie_devices() {
             alloc::collections::BTreeMap::new();
 
         for device in &manager.devices {
-            devices_by_class.entry(device.class_code).or_default().push(device);
+            devices_by_class
+                .entry(device.class_code)
+                .or_default()
+                .push(device);
         }
 
         for (class_code, devices) in devices_by_class {
@@ -242,7 +260,8 @@ fn list_pcie_devices() {
                     _ => "Unknown",
                 };
 
-                info!("  {:02x}:{:02x}.{} [{:04x}:{:04x}] {} - {} (rev {:02x})",
+                info!(
+                    "  {:02x}:{:02x}.{} [{:04x}:{:04x}] {} - {} (rev {:02x})",
                     device.bus,
                     device.device,
                     device.function,
@@ -273,19 +292,31 @@ fn list_pcie_devices() {
                 let mut bar_status = Vec::new();
                 for (i, bar) in device.bars.iter().enumerate() {
                     match bar {
-                        pci::device::BarInfo::Memory(MemoryBar { address, size, prefetchable, .. }) => {
+                        pci::device::BarInfo::Memory(MemoryBar {
+                            address,
+                            size,
+                            prefetchable,
+                            ..
+                        }) => {
                             let assigned = address.as_u64() != 0;
                             let status = if assigned { "ASSIGNED" } else { "UNASSIGNED" };
-                            bar_status.push(format!("BAR{}: Memory {:#x} [{}] (size={}KB{})",
-                                i, address.as_u64(), status, size >> 10,
-                                if *prefetchable { ", prefetchable" } else { "" }));
-                        },
+                            bar_status.push(format!(
+                                "BAR{}: Memory {:#x} [{}] (size={}KB{})",
+                                i,
+                                address.as_u64(),
+                                status,
+                                size >> 10,
+                                if *prefetchable { ", prefetchable" } else { "" }
+                            ));
+                        }
                         pci::device::BarInfo::Io(IoBar { address, size }) => {
                             let assigned = *address != 0;
                             let status = if assigned { "ASSIGNED" } else { "UNASSIGNED" };
-                            bar_status.push(format!("BAR{i}: I/O {address:#x} [{status}] (size={size}B)"));
-                        },
-                        pci::device::BarInfo::Unused => {},
+                            bar_status.push(format!(
+                                "BAR{i}: I/O {address:#x} [{status}] (size={size}B)"
+                            ));
+                        }
+                        pci::device::BarInfo::Unused => {}
                     }
                 }
 
@@ -306,8 +337,6 @@ fn list_pcie_devices() {
         warn!("PCIe manager not initialized");
     }
 }
-
-
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -350,7 +379,7 @@ fn panic(info: &PanicInfo) -> ! {
 #[cfg(test)]
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    use crate::testing::{exit_qemu, QemuExitCode};
+    use crate::testing::{QemuExitCode, exit_qemu};
 
     serial_println!("[failed]");
     serial_println!("Error: {}", info);
@@ -366,7 +395,6 @@ fn hcf() -> ! {
         }
     }
 }
-
 
 #[test_case]
 fn trivial_assertion() {

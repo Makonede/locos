@@ -13,34 +13,34 @@ pub struct CapabilityRegisters {
     /// Capability Register Length (CAPLENGTH) - 8 bits
     /// Length of the capability register space
     pub cap_length: u8,
-    
+
     /// Reserved - 8 bits
     _reserved1: u8,
-    
+
     /// Host Controller Interface Version Number (HCIVERSION) - 16 bits
     /// BCD encoding of the xHCI specification version
     pub hci_version: u16,
-    
+
     /// Host Controller Structural Parameters 1 (HCSPARAMS1) - 32 bits
     pub hcs_params1: HcsParams1,
-    
+
     /// Host Controller Structural Parameters 2 (HCSPARAMS2) - 32 bits
     pub hcs_params2: HcsParams2,
-    
+
     /// Host Controller Structural Parameters 3 (HCSPARAMS3) - 32 bits
     pub hcs_params3: HcsParams3,
-    
+
     /// Host Controller Capability Parameters 1 (HCCPARAMS1) - 32 bits
     pub hcc_params1: HccParams1,
-    
+
     /// Doorbell Offset (DBOFF) - 32 bits
     /// Offset to doorbell array from the base address
     pub doorbell_offset: u32,
-    
+
     /// Runtime Register Space Offset (RTSOFF) - 32 bits
     /// Offset to runtime registers from the base address
     pub runtime_offset: u32,
-    
+
     /// Host Controller Capability Parameters 2 (HCCPARAMS2) - 32 bits
     pub hcc_params2: HccParams2,
 }
@@ -55,12 +55,12 @@ impl HcsParams1 {
     pub fn max_device_slots(&self) -> u8 {
         (self.0 & 0xFF) as u8
     }
-    
+
     /// Maximum number of interrupters (1-1023)
     pub fn max_interrupters(&self) -> u16 {
         ((self.0 >> 8) & 0x7FF) as u16
     }
-    
+
     /// Maximum number of ports (1-255)
     pub fn max_ports(&self) -> u8 {
         ((self.0 >> 24) & 0xFF) as u8
@@ -77,12 +77,12 @@ impl HcsParams2 {
     pub fn ist(&self) -> u8 {
         (self.0 & 0xF) as u8
     }
-    
+
     /// Event Ring Segment Table Max (ERSTMAX)
     pub fn erst_max(&self) -> u16 {
         ((self.0 >> 4) & 0xF) as u16
     }
-    
+
     /// Max Scratchpad Buffers
     pub fn max_scratchpad_buffers(&self) -> u16 {
         let hi = ((self.0 >> 21) & 0x1F) as u16;
@@ -101,7 +101,7 @@ impl HcsParams3 {
     pub fn u1_device_exit_latency(&self) -> u8 {
         (self.0 & 0xFF) as u8
     }
-    
+
     /// U2 Device Exit Latency
     pub fn u2_device_exit_latency(&self) -> u16 {
         ((self.0 >> 16) & 0xFFFF) as u16
@@ -118,67 +118,67 @@ impl HccParams1 {
     pub fn ac64(&self) -> bool {
         (self.0 & 0x1) != 0
     }
-    
+
     /// Bandwidth Negotiation Capability
     pub fn bnc(&self) -> bool {
         (self.0 & 0x2) != 0
     }
-    
+
     /// Context Size (0 = 32 bytes, 1 = 64 bytes)
     pub fn csz(&self) -> bool {
         (self.0 & 0x4) != 0
     }
-    
+
     /// Port Power Control
     pub fn ppc(&self) -> bool {
         (self.0 & 0x8) != 0
     }
-    
+
     /// Port Indicators
     pub fn pind(&self) -> bool {
         (self.0 & 0x10) != 0
     }
-    
+
     /// Light HC Reset Capability
     pub fn lhrc(&self) -> bool {
         (self.0 & 0x20) != 0
     }
-    
+
     /// Latency Tolerance Messaging Capability
     pub fn ltc(&self) -> bool {
         (self.0 & 0x40) != 0
     }
-    
+
     /// No Secondary SID Support
     pub fn nss(&self) -> bool {
         (self.0 & 0x80) != 0
     }
-    
+
     /// Parse All Event Data
     pub fn pae(&self) -> bool {
         (self.0 & 0x100) != 0
     }
-    
+
     /// Stopped - Short Packet Capability
     pub fn spc(&self) -> bool {
         (self.0 & 0x200) != 0
     }
-    
+
     /// Stopped EDTLA Capability
     pub fn sec(&self) -> bool {
         (self.0 & 0x400) != 0
     }
-    
+
     /// Contiguous Frame ID Capability
     pub fn cfc(&self) -> bool {
         (self.0 & 0x800) != 0
     }
-    
+
     /// Maximum Primary Stream Array Size
     pub fn max_psasize(&self) -> u8 {
         ((self.0 >> 12) & 0xF) as u8
     }
-    
+
     /// xHCI Extended Capabilities Pointer
     pub fn xecp(&self) -> u16 {
         ((self.0 >> 16) & 0xFFFF) as u16
@@ -195,47 +195,47 @@ impl HccParams2 {
     pub fn u3c(&self) -> bool {
         (self.0 & 0x1) != 0
     }
-    
+
     /// Configure Endpoint Command Max Exit Latency Too Large Capability
     pub fn cmc(&self) -> bool {
         (self.0 & 0x2) != 0
     }
-    
+
     /// Force Save Context Capability
     pub fn fsc(&self) -> bool {
         (self.0 & 0x4) != 0
     }
-    
+
     /// Compliance Transition Capability
     pub fn ctc(&self) -> bool {
         (self.0 & 0x8) != 0
     }
-    
+
     /// Large ESIT Payload Capability
     pub fn lec(&self) -> bool {
         (self.0 & 0x10) != 0
     }
-    
+
     /// Configuration Information Capability
     pub fn cic(&self) -> bool {
         (self.0 & 0x20) != 0
     }
-    
+
     /// Extended TBC Capability
     pub fn etc(&self) -> bool {
         (self.0 & 0x40) != 0
     }
-    
+
     /// Extended TBC TRB Status Capability
     pub fn etc_tsc(&self) -> bool {
         (self.0 & 0x80) != 0
     }
-    
+
     /// Get/Set Extended Property Capability
     pub fn gsc(&self) -> bool {
         (self.0 & 0x100) != 0
     }
-    
+
     /// Virtualization Based Trusted I/O Capability
     pub fn vtc(&self) -> bool {
         (self.0 & 0x200) != 0
@@ -248,28 +248,28 @@ impl HccParams2 {
 pub struct OperationalRegisters {
     /// USB Command Register (USBCMD) - 32 bits
     pub usb_cmd: UsbCmd,
-    
+
     /// USB Status Register (USBSTS) - 32 bits
     pub usb_sts: UsbSts,
-    
+
     /// Page Size Register (PAGESIZE) - 32 bits
     pub page_size: u32,
-    
+
     /// Reserved - 8 bytes
     _reserved1: [u32; 2],
-    
+
     /// Device Notification Control Register (DNCTRL) - 32 bits
     pub device_notification_ctrl: u32,
-    
+
     /// Command Ring Control Register (CRCR) - 64 bits
     pub command_ring_ctrl: u64,
-    
+
     /// Reserved - 16 bytes
     _reserved2: [u32; 4],
-    
+
     /// Device Context Base Address Array Pointer (DCBAAP) - 64 bits
     pub device_context_base_addr: u64,
-    
+
     /// Configure Register (CONFIG) - 32 bits
     pub config: Config,
 }
@@ -284,7 +284,7 @@ impl UsbCmd {
     pub fn run_stop(&self) -> bool {
         (self.0 & 0x1) != 0
     }
-    
+
     pub fn set_run_stop(&mut self, value: bool) {
         if value {
             self.0 |= 0x1;
@@ -292,12 +292,12 @@ impl UsbCmd {
             self.0 &= !0x1;
         }
     }
-    
+
     /// Host Controller Reset
     pub fn hc_reset(&self) -> bool {
         (self.0 & 0x2) != 0
     }
-    
+
     pub fn set_hc_reset(&mut self, value: bool) {
         if value {
             self.0 |= 0x2;
@@ -305,12 +305,12 @@ impl UsbCmd {
             self.0 &= !0x2;
         }
     }
-    
+
     /// Interrupter Enable
     pub fn interrupter_enable(&self) -> bool {
         (self.0 & 0x4) != 0
     }
-    
+
     pub fn set_interrupter_enable(&mut self, value: bool) {
         if value {
             self.0 |= 0x4;
@@ -318,12 +318,12 @@ impl UsbCmd {
             self.0 &= !0x4;
         }
     }
-    
+
     /// Host System Error Enable
     pub fn host_system_error_enable(&self) -> bool {
         (self.0 & 0x8) != 0
     }
-    
+
     pub fn set_host_system_error_enable(&mut self, value: bool) {
         if value {
             self.0 |= 0x8;
@@ -958,16 +958,20 @@ impl XhciRegisters {
 
     /// Get Port Status and Control register for a specific port (1-based)
     pub fn port_sc(&self, port: u8) -> PortSc {
-        assert!(port > 0 && port <= self.capability_regs.hcs_params1.max_ports(),
-                "Port {} out of range", port);
+        assert!(
+            port > 0 && port <= self.capability_regs.hcs_params1.max_ports(),
+            "Port {port} out of range"
+        );
         let offset = 0x400 + ((port - 1) as u16 * 0x10);
         PortSc(self.read_operational_u32(offset))
     }
 
     /// Set Port Status and Control register for a specific port (1-based)
     pub fn set_port_sc(&self, port: u8, portsc: PortSc) {
-        assert!(port > 0 && port <= self.capability_regs.hcs_params1.max_ports(),
-                "Port {} out of range", port);
+        assert!(
+            port > 0 && port <= self.capability_regs.hcs_params1.max_ports(),
+            "Port {port} out of range"
+        );
         let offset = 0x400 + ((port - 1) as u16 * 0x10);
         self.write_operational_u32(offset, portsc.0);
     }
@@ -1003,16 +1007,20 @@ impl XhciRegisters {
 
     /// Get Interrupter Management register for a specific interrupter
     pub fn interrupter_management(&self, interrupter: u16) -> InterrupterManagement {
-        assert!(interrupter < self.capability_regs.hcs_params1.max_interrupters(),
-                "Interrupter {} out of range", interrupter);
+        assert!(
+            interrupter < self.capability_regs.hcs_params1.max_interrupters(),
+            "Interrupter {interrupter} out of range"
+        );
         let offset = 0x20 + (interrupter * 0x20);
         InterrupterManagement(self.read_runtime_u32(offset))
     }
 
     /// Set Interrupter Management register for a specific interrupter
     pub fn set_interrupter_management(&self, interrupter: u16, iman: InterrupterManagement) {
-        assert!(interrupter < self.capability_regs.hcs_params1.max_interrupters(),
-                "Interrupter {} out of range", interrupter);
+        assert!(
+            interrupter < self.capability_regs.hcs_params1.max_interrupters(),
+            "Interrupter {interrupter} out of range"
+        );
         let offset = 0x20 + (interrupter * 0x20);
         self.write_runtime_u32(offset, iman.0);
     }

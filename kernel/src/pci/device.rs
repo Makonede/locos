@@ -13,10 +13,9 @@ use x86_64::PhysAddr;
 use crate::debug;
 
 use super::{
-    mcfg::{EcamRegion, read_config_u32, write_config_u32, read_config_u16, read_config_u8},
     PciError,
+    mcfg::{EcamRegion, read_config_u8, read_config_u16, read_config_u32, write_config_u32},
 };
-
 
 /// PCIe configuration space offsets
 pub mod config_offsets {
@@ -78,7 +77,12 @@ pub struct MemoryBar {
 
 impl MemoryBar {
     pub fn new(address: PhysAddr, size: u64, prefetchable: bool, is_64bit: bool) -> Self {
-        Self { address, size, prefetchable, is_64bit }
+        Self {
+            address,
+            size,
+            prefetchable,
+            is_64bit,
+        }
     }
 }
 
@@ -230,24 +234,78 @@ pub fn probe_device(
     function: u8,
 ) -> Result<Option<PciDevice>, PciError> {
     // Read vendor ID to check if device exists
-    let vendor_id = read_config_u16(ecam_region, bus, device, function, config_offsets::VENDOR_ID);
-    
+    let vendor_id = read_config_u16(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::VENDOR_ID,
+    );
+
     // 0xFFFF indicates no device present
     if vendor_id == 0xFFFF {
         return Ok(None);
     }
 
     // Read basic device information
-    let device_id = read_config_u16(ecam_region, bus, device, function, config_offsets::DEVICE_ID);
-    let class_code = read_config_u8(ecam_region, bus, device, function, config_offsets::CLASS_CODE);
+    let device_id = read_config_u16(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::DEVICE_ID,
+    );
+    let class_code = read_config_u8(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::CLASS_CODE,
+    );
     let subclass = read_config_u8(ecam_region, bus, device, function, config_offsets::SUBCLASS);
     let prog_if = read_config_u8(ecam_region, bus, device, function, config_offsets::PROG_IF);
-    let revision_id = read_config_u8(ecam_region, bus, device, function, config_offsets::REVISION_ID);
-    let header_type_raw = read_config_u8(ecam_region, bus, device, function, config_offsets::HEADER_TYPE) & 0x7F;
-    let subsystem_vendor_id = read_config_u16(ecam_region, bus, device, function, config_offsets::SUBSYSTEM_VENDOR_ID);
-    let subsystem_id = read_config_u16(ecam_region, bus, device, function, config_offsets::SUBSYSTEM_ID);
-    let interrupt_line = read_config_u8(ecam_region, bus, device, function, config_offsets::INTERRUPT_LINE);
-    let interrupt_pin = read_config_u8(ecam_region, bus, device, function, config_offsets::INTERRUPT_PIN);
+    let revision_id = read_config_u8(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::REVISION_ID,
+    );
+    let header_type_raw = read_config_u8(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::HEADER_TYPE,
+    ) & 0x7F;
+    let subsystem_vendor_id = read_config_u16(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::SUBSYSTEM_VENDOR_ID,
+    );
+    let subsystem_id = read_config_u16(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::SUBSYSTEM_ID,
+    );
+    let interrupt_line = read_config_u8(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::INTERRUPT_LINE,
+    );
+    let interrupt_pin = read_config_u8(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::INTERRUPT_PIN,
+    );
 
     let header_type = match header_type_raw {
         0x00 => HeaderType::Normal,
@@ -299,7 +357,13 @@ pub fn is_multifunction_device(
     device: u8,
     function: u8,
 ) -> Result<bool, PciError> {
-    let header_type = read_config_u8(ecam_region, bus, device, function, config_offsets::HEADER_TYPE);
+    let header_type = read_config_u8(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::HEADER_TYPE,
+    );
     Ok((header_type & 0x80) != 0)
 }
 
@@ -326,7 +390,7 @@ fn parse_bars(
             // Memory BAR
             let is_64bit = (bar_value & 0x6) == 0x4;
             let prefetchable = (bar_value & 0x8) != 0;
-            
+
             let address_raw = if is_64bit && i < 5 {
                 let high_bar = read_config_u32(ecam_region, bus, device, function, bar_offset + 4);
                 ((high_bar as u64) << 32) | (bar_value & 0xFFFFFFF0) as u64
@@ -337,14 +401,12 @@ fn parse_bars(
             // Determine BAR size using the standard method
             let size = determine_bar_size(ecam_region, bus, device, function, bar_offset, is_64bit);
 
-            bars[i] = BarInfo::Memory(
-                MemoryBar::new(
-                    PhysAddr::new(address_raw),
-                    size,
-                    prefetchable,
-                    is_64bit,
-                )
-            );
+            bars[i] = BarInfo::Memory(MemoryBar::new(
+                PhysAddr::new(address_raw),
+                size,
+                prefetchable,
+                is_64bit,
+            ));
 
             if is_64bit {
                 i += 2; // Skip next BAR as it's the high part
@@ -379,7 +441,13 @@ fn parse_capabilities(
         return Ok(capabilities); // No capabilities
     }
 
-    let mut cap_ptr = read_config_u8(ecam_region, bus, device, function, config_offsets::CAPABILITIES_PTR);
+    let mut cap_ptr = read_config_u8(
+        ecam_region,
+        bus,
+        device,
+        function,
+        config_offsets::CAPABILITIES_PTR,
+    );
 
     while cap_ptr != 0 && cap_ptr != 0xFF {
         let cap_id = read_config_u8(ecam_region, bus, device, function, cap_ptr as u16);
@@ -414,16 +482,30 @@ fn determine_bar_size(
 
     if is_64bit {
         write_config_u32(ecam_region, bus, device, function, bar_offset, 0xFFFFFFFF);
-        write_config_u32(ecam_region, bus, device, function, bar_offset + 4, 0xFFFFFFFF);
+        write_config_u32(
+            ecam_region,
+            bus,
+            device,
+            function,
+            bar_offset + 4,
+            0xFFFFFFFF,
+        );
 
         let size_low = read_config_u32(ecam_region, bus, device, function, bar_offset);
         let size_high = read_config_u32(ecam_region, bus, device, function, bar_offset + 4);
 
-        write_config_u32(ecam_region, bus, device, function, bar_offset + 4, original_high);
+        write_config_u32(
+            ecam_region,
+            bus,
+            device,
+            function,
+            bar_offset + 4,
+            original_high,
+        );
         write_config_u32(ecam_region, bus, device, function, bar_offset, original_low);
 
         let size_mask_64 = ((size_high as u64) << 32) | ((size_low & 0xFFFFFFF0) as u64);
-        
+
         if size_mask_64 == 0 {
             0
         } else {
@@ -469,9 +551,5 @@ fn determine_io_bar_size(
     // Calculate size (mask off the lower 2 bits for I/O BARs)
     let size_mask = size_mask & 0xFFFFFFFC;
 
-    if size_mask == 0 {
-        0
-    } else {
-        (!size_mask) + 1
-    }
+    if size_mask == 0 { 0 } else { (!size_mask) + 1 }
 }

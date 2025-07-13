@@ -1,4 +1,7 @@
-use crate::{println, serial_println, tasks::scheduler::{kcreate_task, kexit_task}};
+use crate::{
+    println, serial_println,
+    tasks::scheduler::{kcreate_task, kexit_task},
+};
 
 #[test_case]
 fn test_multitasking() {

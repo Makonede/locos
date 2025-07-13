@@ -141,7 +141,9 @@ impl DoubleFreeList {
         if let Some(mut node) = self.links.next {
             self.links.next = unsafe { node.as_mut().links.next };
             if let Some(mut next_node) = self.links.next {
-                unsafe { next_node.as_mut().links.prev = None; }
+                unsafe {
+                    next_node.as_mut().links.prev = None;
+                }
             }
             self.len -= 1;
             Some(node)
@@ -162,7 +164,7 @@ impl DoubleFreeList {
 
     /// Removes a specific node from the double free list.
     /// This is O(1) since we have direct access to the node.
-    /// 
+    ///
     /// # Safety
     /// The caller must ensure that:
     /// - The node pointer is valid and points to a properly initialized DoubleFreeListNode
@@ -170,13 +172,13 @@ impl DoubleFreeList {
     /// - No other references to the node exist
     pub const unsafe fn remove(&mut self, mut node: NonNull<DoubleFreeListNode>) {
         let node_ref = unsafe { node.as_mut() };
-        
+
         if let Some(mut prev) = node_ref.links.prev {
             unsafe { prev.as_mut() }.links.next = node_ref.links.next;
         } else {
             self.links.next = node_ref.links.next;
         }
-        
+
         if let Some(mut next) = node_ref.links.next {
             unsafe { next.as_mut() }.links.prev = node_ref.links.prev;
         }
@@ -184,15 +186,15 @@ impl DoubleFreeList {
         node_ref.links.next = None;
         node_ref.links.prev = None;
         node_ref.level_size = None; // not part of any level anymore
-        
+
         self.len -= 1;
     }
 
     /// Checks if a specific node exists in the list by checking that the
     /// level it belongs to matches the given level size.
-    /// 
+    ///
     /// # Safety
-    /// The caller must ensure that the node pointer is valid and points to a properly 
+    /// The caller must ensure that the node pointer is valid and points to a properly
     /// initialized DoubleFreeListNode.
     pub unsafe fn contains(&self, node: NonNull<DoubleFreeListNode>, level_size: usize) -> bool {
         let node_ref = unsafe { node.as_ref() };
@@ -207,11 +209,11 @@ pub struct DoubleFreeListLink {
 }
 
 impl DoubleFreeListLink {
-    pub const fn new(next: Option<NonNull<DoubleFreeListNode>>, prev: Option<NonNull<DoubleFreeListNode>>) -> Self {
-        DoubleFreeListLink {
-            next,
-            prev,
-        }
+    pub const fn new(
+        next: Option<NonNull<DoubleFreeListNode>>,
+        prev: Option<NonNull<DoubleFreeListNode>>,
+    ) -> Self {
+        DoubleFreeListLink { next, prev }
     }
 }
 
@@ -222,14 +224,11 @@ unsafe impl Send for DoubleFreeListLink {}
 pub struct DoubleFreeListNode {
     pub links: DoubleFreeListLink,
     /// Size of the level this node belongs to in pages.
-    pub level_size: Option<usize>, 
+    pub level_size: Option<usize>,
 }
 
 impl DoubleFreeListNode {
     pub const fn new(links: DoubleFreeListLink, level_size: Option<usize>) -> Self {
-        DoubleFreeListNode {
-            links,
-            level_size,
-        }
+        DoubleFreeListNode { links, level_size }
     }
 }

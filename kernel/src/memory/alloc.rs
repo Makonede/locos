@@ -14,7 +14,10 @@ use x86_64::{
     },
 };
 
-use super::{freelist::{FreeList, Node}, FRAME_ALLOCATOR, PAGE_TABLE};
+use super::{
+    FRAME_ALLOCATOR, PAGE_TABLE,
+    freelist::{FreeList, Node},
+};
 
 pub static PAGE_ALLOCATOR: Mutex<Option<PageAllocator>> = Mutex::new(None);
 
@@ -112,7 +115,6 @@ impl<A> Locked<A> {
         self.inner.lock()
     }
 }
-
 
 /// A buddy allocator for managing heap memory allocations
 ///
