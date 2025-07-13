@@ -31,6 +31,8 @@ test: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME)-test.iso
 		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-x86_64.fd \
 		-cdrom $(IMAGE_NAME)-test.iso \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
+		-device qemu-xhci \
+		-device usb-kbd \
 		-serial stdio \
 		-display none \
 		-m 2G \
