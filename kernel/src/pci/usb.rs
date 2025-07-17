@@ -1,5 +1,5 @@
 pub mod xhci;
-pub mod dcbaa;
+pub mod init_helpers;
 pub mod xhci_registers;
 
 /// see xhci
