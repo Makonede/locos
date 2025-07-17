@@ -13,7 +13,7 @@ pub fn init_dcbaa(xhci_regs: &mut XhciRegisters) {
 
     let mut lock = FRAME_ALLOCATOR.lock();
     let allocator = lock.as_mut().unwrap();
-    let dcbaa_virt = allocator.allocate_pages(frames_needed)
+    let dcbaa_virt = allocator.allocate_contiguous_pages(frames_needed)
         .expect("Failed to allocate frames for DCBAA");
 
     // zero out pages

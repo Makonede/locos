@@ -336,7 +336,7 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
 impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
     /// returns a virtual address the start of a contiguous block of frames
     #[inline]
-    pub fn allocate_pages(&mut self, pages: usize) -> Option<VirtAddr> {
+    pub fn allocate_contiguous_pages(&mut self, pages: usize) -> Option<VirtAddr> {
         assert!(
             pages.is_power_of_two(),
             "Number of pages must be a power of two"
@@ -354,7 +354,7 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
     /// # Safety
     /// The caller must ensure that the address was allocated by this allocator and is not in use.
     #[inline]
-    pub unsafe fn deallocate_pages(&mut self, virt_addr: VirtAddr, pages: usize) {
+    pub unsafe fn deallocate_contiguous_pages(&mut self, virt_addr: VirtAddr, pages: usize) {
         assert!(
             pages.is_power_of_two(),
             "Number of pages must be a power of two"
@@ -370,32 +370,32 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
         panic!("Address {:#x} not managed by any allocator", addr);
     }
 
-    /// allocates a physical frame
-    pub fn allocate_frames(&mut self, frames: usize) -> Option<PhysAddr> {
+    /// allocates contiguous physical frames
+    pub fn allocate_contiguous_frames(&mut self, frames: usize) -> Option<PhysAddr> {
         assert!(
             frames.is_power_of_two(),
             "Number of frames must be a power of two"
         );
 
-        self.allocate_pages(frames).map(|virt_addr| {
+        self.allocate_contiguous_pages(frames).map(|virt_addr| {
             let phys_addr = virt_addr.as_u64() - self.hddm_offset;
             PhysAddr::new(phys_addr)
         })
     }
 
-    /// deallocates a physical frame
+    /// deallocates contiguous physical frames
     ///
     /// # Safety
     /// The caller must ensure that the physical address was allocated by this allocator and is not in use.
     #[inline]
-    pub unsafe fn deallocate_frames(&mut self, phys_addr: PhysAddr, frames: usize) {
+    pub unsafe fn deallocate_contiguous_frames(&mut self, phys_addr: PhysAddr, frames: usize) {
         assert!(
             frames.is_power_of_two(),
             "Number of frames must be a power of two"
         );
 
         let virt_addr = VirtAddr::new(phys_addr.as_u64() + self.hddm_offset);
-        unsafe { self.deallocate_pages(virt_addr, frames) };
+        unsafe { self.deallocate_contiguous_pages(virt_addr, frames) };
     }
 }
 
@@ -403,7 +403,7 @@ unsafe impl<const N: usize, const L: usize> FrameAllocator<Size4KiB>
     for FrameBuddyAllocatorForest<N, L>
 {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        self.allocate_frames(1)
+        self.allocate_contiguous_frames(1)
             .map(|phys_addr| PhysFrame::containing_address(phys_addr))
     }
 }
@@ -413,7 +413,7 @@ impl<const N: usize, const L: usize> FrameDeallocator<Size4KiB>
 {
     unsafe fn deallocate_frame(&mut self, frame: PhysFrame) {
         let phys_addr = frame.start_address().as_u64();
-        unsafe { self.deallocate_frames(PhysAddr::new(phys_addr), 1) };
+        unsafe { self.deallocate_contiguous_frames(PhysAddr::new(phys_addr), 1) };
     }
 }
 
