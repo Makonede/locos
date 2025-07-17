@@ -31,6 +31,11 @@ pub fn find_xhci_devices() -> Vec<PciDevice> {
     xhci_devices
 }
 
+/// find xhci devices and resets the controller.
+/// 
+/// allocates the dcbas
+/// 
+/// at the end, populates the XHCI_REGS static.
 pub fn xhci_init() {
     let devices = find_xhci_devices();
     let primary_device = devices.first().expect("No XHCI devices found");
