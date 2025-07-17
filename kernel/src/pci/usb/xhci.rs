@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use spin::Mutex;
 
 use super::xhci_registers::XhciRegisters;
 use crate::{
@@ -10,6 +11,8 @@ use crate::{
     },
     warn,
 };
+
+pub static XHCI_REGS: Mutex<Option<XhciRegisters>> = Mutex::new(None);
 
 #[allow(clippy::let_and_return)]
 pub fn find_xhci_devices() -> Vec<PciDevice> {
@@ -101,13 +104,11 @@ pub fn xhci_init() {
         info!("Controller is already halted");
     }
 
-    // Reset the controller
     info!("Resetting controller...");
     let mut usb_cmd = xhci_regs.usb_cmd();
     usb_cmd.set_hc_reset(true);
     xhci_regs.set_usb_cmd(usb_cmd);
 
-    // Wait for reset to complete
     loop {
         let cmd = xhci_regs.usb_cmd();
         if !cmd.hc_reset() {
@@ -115,7 +116,6 @@ pub fn xhci_init() {
         }
     }
 
-    // Wait for controller to be ready
     loop {
         let sts = xhci_regs.usb_sts();
         if !sts.controller_not_ready() {
@@ -124,14 +124,12 @@ pub fn xhci_init() {
     }
     info!("Controller reset complete and ready");
 
-    // Configure the controller
     let max_slots = xhci_regs.capability().hcs_params1.max_device_slots();
     let mut config = xhci_regs.config();
     config.set_max_device_slots_enabled(max_slots);
     xhci_regs.set_config(config);
     info!("Configured {} device slots", max_slots);
 
-    // Check port status
     let max_ports = xhci_regs.capability().hcs_params1.max_ports();
     for port in 1..=max_ports {
         let portsc = xhci_regs.port_sc(port);
@@ -146,5 +144,6 @@ pub fn xhci_init() {
         }
     }
 
+    *XHCI_REGS.lock() = Some(xhci_regs);
     info!("xHCI initialization complete");
 }

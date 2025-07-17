@@ -262,7 +262,7 @@ pub struct OperationalRegisters {
     pub device_notification_ctrl: u32,
 
     /// Command Ring Control Register (CRCR) - 64 bits
-    pub command_ring_ctrl: u64,
+    pub command_ring_ctrl: CommandRingControl,
 
     /// Reserved - 16 bytes
     _reserved2: [u32; 4],
@@ -457,6 +457,86 @@ impl UsbSts {
     /// Clear port change detect (write 1 to clear)
     pub fn clear_port_change_detect(&mut self) {
         self.0 |= 0x10;
+    }
+}
+
+/// Command Ring Control Register (CRCR)
+#[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
+pub struct CommandRingControl(pub u64);
+
+impl CommandRingControl {
+    /// Ring Cycle State (RCS) - bit 0
+    /// Indicates the current cycle bit value for the command ring
+    pub fn ring_cycle_state(&self) -> bool {
+        (self.0 & 0x1) != 0
+    }
+
+    pub fn set_ring_cycle_state(&mut self, value: bool) {
+        if value {
+            self.0 |= 0x1;
+        } else {
+            self.0 &= !0x1;
+        }
+    }
+
+    /// Command Stop (CS) - bit 1
+    /// Software sets this bit to stop the command ring
+    pub fn command_stop(&self) -> bool {
+        (self.0 & 0x2) != 0
+    }
+
+    pub fn set_command_stop(&mut self, value: bool) {
+        if value {
+            self.0 |= 0x2;
+        } else {
+            self.0 &= !0x2;
+        }
+    }
+
+    /// Command Abort (CA) - bit 2
+    /// Software sets this bit to abort the currently executing command
+    pub fn command_abort(&self) -> bool {
+        (self.0 & 0x4) != 0
+    }
+
+    pub fn set_command_abort(&mut self, value: bool) {
+        if value {
+            self.0 |= 0x4;
+        } else {
+            self.0 &= !0x4;
+        }
+    }
+
+    /// Command Ring Running (CRR) - bit 3 (read-only)
+    /// Indicates whether the command ring is running
+    pub fn command_ring_running(&self) -> bool {
+        (self.0 & 0x8) != 0
+    }
+
+    /// Reserved bits 4-5 should be preserved
+
+    /// Command Ring Pointer - bits 6-63
+    /// Physical address of the command ring (must be 64-byte aligned)
+    pub fn command_ring_pointer(&self) -> u64 {
+        self.0 & !0x3F  // Clear lower 6 bits
+    }
+
+    pub fn set_command_ring_pointer(&mut self, addr: u64) {
+        // Ensure address is 64-byte aligned
+        assert_eq!(addr & 0x3F, 0, "Command ring pointer must be 64-byte aligned");
+
+        // Preserve lower 6 control bits, set upper address bits
+        self.0 = (self.0 & 0x3F) | (addr & !0x3F);
+    }
+
+    /// Create a new CRCR with the given ring pointer and cycle state
+    pub fn new(ring_pointer: u64, cycle_state: bool) -> Self {
+        assert_eq!(ring_pointer & 0x3F, 0, "Command ring pointer must be 64-byte aligned");
+
+        let mut crcr = Self(ring_pointer);
+        crcr.set_ring_cycle_state(cycle_state);
+        crcr
     }
 }
 
@@ -826,15 +906,17 @@ pub struct XhciRegisters {
     /// Capability registers (read-only)
     capability_regs: &'static CapabilityRegisters,
 
-    /// Operational registers
-    operational_base: VirtAddr,
+    /// Operational registers pointer
+    operational_regs: *mut OperationalRegisters,
 
-    /// Runtime registers base
-    runtime_base: VirtAddr,
+    /// Runtime registers pointer
+    runtime_regs: *mut RuntimeRegisters,
 
     /// Doorbell array base
     doorbell_base: VirtAddr,
 }
+
+unsafe impl Send for XhciRegisters {}
 
 impl XhciRegisters {
     /// Create a new xHCI register accessor from a mapped MMIO base address
@@ -852,11 +934,14 @@ impl XhciRegisters {
             let runtime_base = base_addr + capability_regs.runtime_offset as u64;
             let doorbell_base = base_addr + capability_regs.doorbell_offset as u64;
 
+            let operational_regs = operational_base.as_mut_ptr::<OperationalRegisters>();
+            let runtime_regs = runtime_base.as_mut_ptr::<RuntimeRegisters>();
+
             Self {
                 base_addr,
                 capability_regs,
-                operational_base,
-                runtime_base,
+                operational_regs,
+                runtime_regs,
                 doorbell_base,
             }
         }
@@ -867,93 +952,81 @@ impl XhciRegisters {
         self.capability_regs
     }
 
-    /// Read from operational registers
-    pub fn read_operational_u32(&self, offset: u16) -> u32 {
-        let addr = self.operational_base.as_u64() + offset as u64;
-        unsafe { read_volatile(addr as *const u32) }
-    }
-
-    /// Write to operational registers
-    pub fn write_operational_u32(&self, offset: u16, value: u32) {
-        let addr = self.operational_base.as_u64() + offset as u64;
-        unsafe { write_volatile(addr as *mut u32, value) }
-    }
-
-    /// Read from operational registers (64-bit)
-    pub fn read_operational_u64(&self, offset: u16) -> u64 {
-        let addr = self.operational_base.as_u64() + offset as u64;
-        unsafe { read_volatile(addr as *const u64) }
-    }
-
-    /// Write to operational registers (64-bit)
-    pub fn write_operational_u64(&self, offset: u16, value: u64) {
-        let addr = self.operational_base.as_u64() + offset as u64;
-        unsafe { write_volatile(addr as *mut u64, value) }
-    }
-
     /// Get USB Command register
     pub fn usb_cmd(&self) -> UsbCmd {
-        UsbCmd(self.read_operational_u32(0x00))
+        unsafe { read_volatile(&(*self.operational_regs).usb_cmd) }
     }
 
     /// Set USB Command register
     pub fn set_usb_cmd(&self, cmd: UsbCmd) {
-        self.write_operational_u32(0x00, cmd.0);
+        unsafe {
+            write_volatile(&mut (*self.operational_regs).usb_cmd, cmd);
+        }
     }
 
     /// Get USB Status register
     pub fn usb_sts(&self) -> UsbSts {
-        UsbSts(self.read_operational_u32(0x04))
+        unsafe { read_volatile(&(*self.operational_regs).usb_sts) }
     }
 
     /// Set USB Status register (for clearing status bits)
     pub fn set_usb_sts(&self, sts: UsbSts) {
-        self.write_operational_u32(0x04, sts.0);
+        unsafe {
+            write_volatile(&mut (*self.operational_regs).usb_sts, sts);
+        }
     }
 
     /// Get Page Size register
     pub fn page_size(&self) -> u32 {
-        self.read_operational_u32(0x08)
+        unsafe { read_volatile(&(*self.operational_regs).page_size) }
     }
 
     /// Get Device Notification Control register
     pub fn device_notification_ctrl(&self) -> u32 {
-        self.read_operational_u32(0x14)
+        unsafe { read_volatile(&(*self.operational_regs).device_notification_ctrl) }
     }
 
     /// Set Device Notification Control register
     pub fn set_device_notification_ctrl(&self, value: u32) {
-        self.write_operational_u32(0x14, value);
+        unsafe {
+            write_volatile(&mut (*self.operational_regs).device_notification_ctrl, value);
+        }
     }
 
     /// Get Command Ring Control register
-    pub fn command_ring_ctrl(&self) -> u64 {
-        self.read_operational_u64(0x18)
+    pub fn command_ring_ctrl(&self) -> CommandRingControl {
+        unsafe { read_volatile(&(*self.operational_regs).command_ring_ctrl) }
     }
 
     /// Set Command Ring Control register
-    pub fn set_command_ring_ctrl(&self, value: u64) {
-        self.write_operational_u64(0x18, value);
+    pub fn set_command_ring_ctrl(&self, value: CommandRingControl) {
+        unsafe {
+            write_volatile(&mut (*self.operational_regs).command_ring_ctrl, value);
+        }
     }
 
     /// Get Device Context Base Address Array Pointer
     pub fn device_context_base_addr(&self) -> u64 {
-        self.read_operational_u64(0x30)
+        unsafe { read_volatile(&(*self.operational_regs).device_context_base_addr) }
     }
 
     /// Set Device Context Base Address Array Pointer
     pub fn set_device_context_base_addr(&self, value: u64) {
-        self.write_operational_u64(0x30, value);
+        unsafe {
+            write_volatile(&mut (*self.operational_regs).device_context_base_addr, value);
+        }
     }
 
     /// Get Configure register
     pub fn config(&self) -> Config {
-        Config(self.read_operational_u32(0x38))
+        unsafe { read_volatile(&(*self.operational_regs).config) }
     }
 
     /// Set Configure register
     pub fn set_config(&self, config: Config) {
-        self.write_operational_u32(0x38, config.0);
+        unsafe {
+            write_volatile(&mut (*self.operational_regs).config, config);
+        }
     }
 
     /// Get Port Status and Control register for a specific port (1-based)
@@ -962,8 +1035,12 @@ impl XhciRegisters {
             port > 0 && port <= self.capability_regs.hcs_params1.max_ports(),
             "Port {port} out of range"
         );
+        // Port registers are at offset 0x400 + (port-1) * 0x10 from operational base
+        // Since they're not in the main struct, we need offset-based access
+        let operational_base = self.base_addr + self.capability_regs.cap_length as u64;
         let offset = 0x400 + ((port - 1) as u16 * 0x10);
-        PortSc(self.read_operational_u32(offset))
+        let addr = operational_base.as_u64() + offset as u64;
+        unsafe { PortSc(read_volatile(addr as *const u32)) }
     }
 
     /// Set Port Status and Control register for a specific port (1-based)
@@ -972,37 +1049,16 @@ impl XhciRegisters {
             port > 0 && port <= self.capability_regs.hcs_params1.max_ports(),
             "Port {port} out of range"
         );
+        // Port registers are at offset 0x400 + (port-1) * 0x10 from operational base
+        let operational_base = self.base_addr + self.capability_regs.cap_length as u64;
         let offset = 0x400 + ((port - 1) as u16 * 0x10);
-        self.write_operational_u32(offset, portsc.0);
-    }
-
-    /// Read from runtime registers
-    pub fn read_runtime_u32(&self, offset: u16) -> u32 {
-        let addr = self.runtime_base.as_u64() + offset as u64;
-        unsafe { read_volatile(addr as *const u32) }
-    }
-
-    /// Write to runtime registers
-    pub fn write_runtime_u32(&self, offset: u16, value: u32) {
-        let addr = self.runtime_base.as_u64() + offset as u64;
-        unsafe { write_volatile(addr as *mut u32, value) }
-    }
-
-    /// Read from runtime registers (64-bit)
-    pub fn read_runtime_u64(&self, offset: u16) -> u64 {
-        let addr = self.runtime_base.as_u64() + offset as u64;
-        unsafe { read_volatile(addr as *const u64) }
-    }
-
-    /// Write to runtime registers (64-bit)
-    pub fn write_runtime_u64(&self, offset: u16, value: u64) {
-        let addr = self.runtime_base.as_u64() + offset as u64;
-        unsafe { write_volatile(addr as *mut u64, value) }
+        let addr = operational_base.as_u64() + offset as u64;
+        unsafe { write_volatile(addr as *mut u32, portsc.0) }
     }
 
     /// Get Microframe Index register
     pub fn mfindex(&self) -> u32 {
-        self.read_runtime_u32(0x00)
+        unsafe { read_volatile(&(*self.runtime_regs).mfindex) }
     }
 
     /// Get Interrupter Management register for a specific interrupter
@@ -1011,8 +1067,9 @@ impl XhciRegisters {
             interrupter < self.capability_regs.hcs_params1.max_interrupters(),
             "Interrupter {interrupter} out of range"
         );
-        let offset = 0x20 + (interrupter * 0x20);
-        InterrupterManagement(self.read_runtime_u32(offset))
+        // For now, only support interrupter 0 since RuntimeRegisters only has 1 interrupter
+        assert_eq!(interrupter, 0, "Only interrupter 0 is currently supported");
+        unsafe { read_volatile(&(*self.runtime_regs).interrupters[0].iman) }
     }
 
     /// Set Interrupter Management register for a specific interrupter
@@ -1021,8 +1078,11 @@ impl XhciRegisters {
             interrupter < self.capability_regs.hcs_params1.max_interrupters(),
             "Interrupter {interrupter} out of range"
         );
-        let offset = 0x20 + (interrupter * 0x20);
-        self.write_runtime_u32(offset, iman.0);
+        // For now, only support interrupter 0 since RuntimeRegisters only has 1 interrupter
+        assert_eq!(interrupter, 0, "Only interrupter 0 is currently supported");
+        unsafe {
+            write_volatile(&mut (*self.runtime_regs).interrupters[0].iman, iman);
+        }
     }
 
     /// Ring doorbell for a specific slot/endpoint
@@ -1039,25 +1099,8 @@ impl XhciRegisters {
     }
 }
 
-/// Operational register offsets
-pub mod operational_offsets {
-    pub const USBCMD: u16 = 0x00;
-    pub const USBSTS: u16 = 0x04;
-    pub const PAGESIZE: u16 = 0x08;
-    pub const DNCTRL: u16 = 0x14;
-    pub const CRCR: u16 = 0x18;
-    pub const DCBAAP: u16 = 0x30;
-    pub const CONFIG: u16 = 0x38;
+/// Port register offsets (still needed since ports are variable-length arrays)
+pub mod port_offsets {
     pub const PORTSC_BASE: u16 = 0x400;
-}
-
-/// Runtime register offsets
-pub mod runtime_offsets {
-    pub const MFINDEX: u16 = 0x00;
-    pub const INTERRUPTER_BASE: u16 = 0x20;
-    pub const IMAN_OFFSET: u16 = 0x00;
-    pub const IMOD_OFFSET: u16 = 0x04;
-    pub const ERSTSZ_OFFSET: u16 = 0x08;
-    pub const ERSTBA_OFFSET: u16 = 0x10;
-    pub const ERDP_OFFSET: u16 = 0x18;
+    pub const PORT_REGISTER_SIZE: u16 = 0x10;
 }

@@ -237,7 +237,7 @@ impl<const L: usize> FrameBuddyAllocator<L> {
 pub struct FrameBuddyAllocatorForest<const N: usize = 100, const L: usize = 26> {
     allocators: [Option<FrameBuddyAllocator<L>>; N],
     count: usize,
-    hddm_offset: u64,
+    pub hddm_offset: u64,
 }
 
 impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
@@ -372,6 +372,11 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
 
     /// allocates a physical frame
     pub fn allocate_frames(&mut self, frames: usize) -> Option<PhysAddr> {
+        assert!(
+            frames.is_power_of_two(),
+            "Number of frames must be a power of two"
+        );
+
         self.allocate_pages(frames).map(|virt_addr| {
             let phys_addr = virt_addr.as_u64() - self.hddm_offset;
             PhysAddr::new(phys_addr)
@@ -384,6 +389,11 @@ impl<const N: usize, const L: usize> FrameBuddyAllocatorForest<N, L> {
     /// The caller must ensure that the physical address was allocated by this allocator and is not in use.
     #[inline]
     pub unsafe fn deallocate_frames(&mut self, phys_addr: PhysAddr, frames: usize) {
+        assert!(
+            frames.is_power_of_two(),
+            "Number of frames must be a power of two"
+        );
+
         let virt_addr = VirtAddr::new(phys_addr.as_u64() + self.hddm_offset);
         unsafe { self.deallocate_pages(virt_addr, frames) };
     }
