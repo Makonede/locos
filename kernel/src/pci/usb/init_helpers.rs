@@ -4,6 +4,34 @@ use x86_64::PhysAddr;
 
 use crate::{memory::FRAME_ALLOCATOR, pci::usb::xhci_registers::XhciRegisters, debug};
 
+/// Initialize the Device Context Base Address Array (DCBAA)
+/// 
+/// Should pass in a xchi registers ref
+pub fn init_dcbaa(xhci_regs: &mut XhciRegisters) {
+    let needed_entries = xhci_regs.capability().hcs_params1.max_device_slots() + 1;
+
+    let dcbaa_size = needed_entries as usize * core::mem::size_of::<u64>();
+    let frames_needed = dcbaa_size.div_ceil(4096).next_power_of_two();
+
+    let dcbaa_phys = get_zeroed_dma(frames_needed);
+
+    xhci_regs.set_device_context_base_addr(dcbaa_phys.as_u64());
+    debug!("Allocated DCBAA at {:#x} with {} entries", dcbaa_phys, needed_entries);
+}
+
+
+fn get_zeroed_dma(frames: usize) -> PhysAddr{
+    let mut lock = FRAME_ALLOCATOR.lock();
+    let allocator = lock.as_mut().unwrap();
+    let virt = allocator.allocate_contiguous_pages(frames)
+        .expect("Failed to allocate frames for DMA");
+    unsafe {
+        write_bytes(virt.as_mut_ptr::<()>(), 0, frames * 4096);
+    }
+    PhysAddr::new(virt.as_u64() - allocator.hddm_offset)
+}
+
+
 /// A single TRB
 /// Each TRB is 16 bytes and contains command, event, or transfer information
 #[repr(C)]
@@ -589,31 +617,4 @@ impl CompletionCode {
     pub fn is_error(&self) -> bool {
         !self.is_success() && *self != CompletionCode::Invalid
     }
-}
-
-/// Initialize the Device Context Base Address Array (DCBAA)
-/// 
-/// Should pass in a xchi registers ref
-pub fn init_dcbaa(xhci_regs: &mut XhciRegisters) {
-    let needed_entries = xhci_regs.capability().hcs_params1.max_device_slots() + 1;
-
-    let dcbaa_size = needed_entries as usize * core::mem::size_of::<u64>();
-    let frames_needed = dcbaa_size.div_ceil(4096).next_power_of_two();
-
-    let dcbaa_phys = get_zeroed_dma(frames_needed);
-
-    xhci_regs.set_device_context_base_addr(dcbaa_phys.as_u64());
-    debug!("Allocated DCBAA at {:#x} with {} entries", dcbaa_phys, needed_entries);
-}
-
-
-fn get_zeroed_dma(frames: usize) -> PhysAddr{
-    let mut lock = FRAME_ALLOCATOR.lock();
-    let allocator = lock.as_mut().unwrap();
-    let virt = allocator.allocate_contiguous_pages(frames)
-        .expect("Failed to allocate frames for DMA");
-    unsafe {
-        write_bytes(virt.as_mut_ptr::<()>(), 0, frames * 4096);
-    }
-    PhysAddr::new(virt.as_u64() - allocator.hddm_offset)
 }
