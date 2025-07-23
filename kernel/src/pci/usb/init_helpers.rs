@@ -1,8 +1,11 @@
 use core::{ptr::write_bytes, fmt};
 
-use x86_64::PhysAddr;
+use x86_64::{PhysAddr, VirtAddr};
 
-use crate::{memory::FRAME_ALLOCATOR, pci::usb::xhci_registers::XhciRegisters, debug};
+use crate::{debug, memory::FRAME_ALLOCATOR, pci::usb::xhci_registers::{CommandRingControl, XhciRegisters}};
+
+/// command ring size in 64 trbs
+const COMMAND_RING_SIZE: usize = 256;
 
 /// Initialize the Device Context Base Address Array (DCBAA)
 /// 
@@ -13,14 +16,31 @@ pub fn init_dcbaa(xhci_regs: &mut XhciRegisters) {
     let dcbaa_size = needed_entries as usize * core::mem::size_of::<u64>();
     let frames_needed = dcbaa_size.div_ceil(4096).next_power_of_two();
 
-    let dcbaa_phys = get_zeroed_dma(frames_needed);
+    let (dcbaa_phys, _) = get_zeroed_dma(frames_needed);
 
     xhci_regs.set_device_context_base_addr(dcbaa_phys.as_u64());
     debug!("Allocated DCBAA at {:#x} with {} entries", dcbaa_phys, needed_entries);
 }
 
+/// Initialize the trb command ring
+/// 
+/// uses COMMAND_RING_SIZE
+pub fn init_command_ring(xhci_regs: &mut XhciRegisters) {
+    let needed_frames = (COMMAND_RING_SIZE * 8).div_ceil(4096).next_power_of_two();
+    let (ring_phys, ring_virt) = get_zeroed_dma(needed_frames);
 
-fn get_zeroed_dma(frames: usize) -> PhysAddr{
+    let first_trb = ring_virt.as_mut_ptr::<Trb>();
+    let first_link_trb = unsafe { first_trb.add(COMMAND_RING_SIZE - 1) };
+    unsafe {
+        (*first_link_trb) = Trb::link(ring_phys.as_u64(), true, false)
+    }
+
+    xhci_regs.set_command_ring_ctrl(CommandRingControl::new(ring_phys.as_u64(), true));
+    debug!("Allocated command ring at {:#x} with {} TRBs", ring_phys, COMMAND_RING_SIZE);
+}
+
+
+fn get_zeroed_dma(frames: usize) -> (PhysAddr, VirtAddr) {
     let mut lock = FRAME_ALLOCATOR.lock();
     let allocator = lock.as_mut().unwrap();
     let virt = allocator.allocate_contiguous_pages(frames)
@@ -28,7 +48,7 @@ fn get_zeroed_dma(frames: usize) -> PhysAddr{
     unsafe {
         write_bytes(virt.as_mut_ptr::<()>(), 0, frames * 4096);
     }
-    PhysAddr::new(virt.as_u64() - allocator.hddm_offset)
+    (PhysAddr::new(virt.as_u64() - allocator.hddm_offset), virt)
 }
 
 

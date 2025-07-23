@@ -515,7 +515,6 @@ impl CommandRingControl {
     }
 
     /// Reserved bits 4-5 should be preserved
-
     /// Command Ring Pointer - bits 6-63
     /// Physical address of the command ring (must be 64-byte aligned)
     pub fn command_ring_pointer(&self) -> u64 {
