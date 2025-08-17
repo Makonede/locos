@@ -58,7 +58,7 @@ pub fn kinit_multitasking() {
     };
     scheduler.task_list.push_front(current_task);
     debug!(
-        "Added current kernel task to scheduler with RIP: {:#x}, RSP: {:#x}",
+        "Added current kernel task to scheduler with uninit registers",
         current_regs.interrupt_rip, current_regs.interrupt_rsp
     );
 }
