@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use spin::Mutex;
 
-use super::xhci_registers::XhciRegisters;
+use super::{xhci_registers::XhciRegisters, init_helpers::{init_dcbaa, init_command_ring}};
 use crate::{
     info,
     pci::{
@@ -9,7 +9,6 @@ use crate::{
         device::{BarInfo, PciDevice},
         vmm::map_bar,
     },
-    warn,
 };
 
 pub static XHCI_REGS: Mutex<Option<XhciRegisters>> = Mutex::new(None);
@@ -60,7 +59,7 @@ pub fn xhci_init() {
     let mapped_bar = map_bar(memory_bar).unwrap();
 
     // Create xHCI register accessor
-    let xhci_regs = unsafe { XhciRegisters::new(mapped_bar.virtual_address) };
+    let mut xhci_regs = unsafe { XhciRegisters::new(mapped_bar.virtual_address) };
 
     info!("xHCI Controller Information:");
     info!("  HCI Version: {:#x}", xhci_regs.capability().hci_version);
@@ -134,6 +133,10 @@ pub fn xhci_init() {
     config.set_max_device_slots_enabled(max_slots);
     xhci_regs.set_config(config);
     info!("Configured {} device slots", max_slots);
+
+    init_dcbaa(&mut xhci_regs);
+
+    init_command_ring(&mut xhci_regs);
 
     let max_ports = xhci_regs.capability().hcs_params1.max_ports();
     for port in 1..=max_ports {

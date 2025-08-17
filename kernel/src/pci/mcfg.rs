@@ -102,40 +102,46 @@ pub fn parse_mcfg_table(rsdp_addr: usize) -> Result<Vec<EcamRegion>, PciError> {
 
     let mcfg = mcfg_table.get();
 
-    debug!("MCFG table found with {} entries", mcfg.entries().count());
+    debug!("MCFG table found with {} entries", mcfg.entries().len());
 
     let mut ecam_regions = Vec::new();
 
     // Parse each MCFG entry
     for entry in mcfg.entries() {
+        // Copy packed struct fields to local variables to avoid unaligned references
+        let base_address = entry.base_address;
+        let pci_segment_group = entry.pci_segment_group;
+        let bus_number_start = entry.bus_number_start;
+        let bus_number_end = entry.bus_number_end;
+
         debug!(
             "MCFG entry: base={:#x}, segment={}, buses={}-{}",
-            entry.base_address,
-            entry.pci_segment_group,
-            entry.bus_number_start,
-            entry.bus_number_end
+            base_address,
+            pci_segment_group,
+            bus_number_start,
+            bus_number_end
         );
 
         // Validate the ECAM entry
-        if entry.bus_number_end < entry.bus_number_start {
+        if bus_number_end < bus_number_start {
             warn!(
                 "Invalid MCFG entry: end_bus ({}) < start_bus ({}), skipping",
-                entry.bus_number_end, entry.bus_number_start
+                bus_number_end, bus_number_start
             );
             continue;
         }
 
-        if entry.base_address == 0 {
+        if base_address == 0 {
             warn!("Invalid MCFG entry: base_address is 0, skipping");
             continue;
         }
 
         let ecam_region = EcamRegion {
-            base_address: PhysAddr::new(entry.base_address),
+            base_address: PhysAddr::new(base_address),
             virtual_address: VirtAddr::new(0),
-            segment_group: entry.pci_segment_group,
-            start_bus: entry.bus_number_start,
-            end_bus: entry.bus_number_end,
+            segment_group: pci_segment_group,
+            start_bus: bus_number_start,
+            end_bus: bus_number_end,
         };
 
         ecam_regions.push(ecam_region);
