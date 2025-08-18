@@ -30,6 +30,7 @@ use crate::{
     pci::{
         device::{IoBar, MemoryBar},
         vmm::PCIE_VMM,
+        msi::MsiXInfo,
     },
     warn,
 };
@@ -43,6 +44,8 @@ pub struct PciManager {
     pub devices: Vec<device::PciDevice>,
     /// ECAM (Enhanced Configuration Access Mechanism) regions
     pub ecam_regions: Vec<mcfg::EcamRegion>,
+    /// MSI-X configurations for devices that support it
+    pub msix_devices: Vec<MsiXInfo>,
 }
 
 impl Default for PciManager {
@@ -57,6 +60,7 @@ impl PciManager {
         Self {
             devices: Vec::new(),
             ecam_regions: Vec::new(),
+            msix_devices: Vec::new(),
         }
     }
 
@@ -85,6 +89,9 @@ impl PciManager {
 
         // Check BAR assignment status
         self.check_bar_assignment();
+
+        // Initialize MSI-X for supported devices
+        self.msix_devices = msi::init_msix_devices(&self.devices)?;
 
         Ok(())
     }
@@ -121,6 +128,8 @@ impl PciManager {
         Ok(())
     }
 
+
+
     /// Find a device by vendor and device ID
     pub fn find_device(&self, vendor_id: u16, device_id: u16) -> Option<&device::PciDevice> {
         self.devices
@@ -134,6 +143,20 @@ impl PciManager {
             .iter()
             .filter(|dev| dev.class_code == class_code)
             .collect()
+    }
+
+    /// Get all MSI-X configured devices
+    pub fn get_msix_devices(&self) -> &Vec<MsiXInfo> {
+        &self.msix_devices
+    }
+
+    /// Find MSI-X info for a specific device
+    pub fn find_msix_device(&self, bus: u8, device: u8, function: u8) -> Option<&MsiXInfo> {
+        self.msix_devices.iter().find(|msix| {
+            msix.device.bus == bus
+                && msix.device.device == device
+                && msix.device.function == function
+        })
     }
 
     /// Check BAR assignment status for all devices
