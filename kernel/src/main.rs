@@ -28,7 +28,9 @@ pub mod memory;
 pub mod meta;
 pub mod output;
 pub mod pci;
+pub mod ps2;
 pub mod serial;
+pub mod shell;
 pub mod tasks;
 pub mod testing;
 
@@ -59,8 +61,7 @@ use crate::{
         PCI_MANAGER,
         device::{IoBar, MemoryBar},
         usb,
-    },
-    tasks::scheduler::kexit_task,
+    }, tasks::scheduler::kexit_task
 };
 
 #[cfg(not(test))]
@@ -156,12 +157,15 @@ unsafe extern "C" fn kernel_main() -> ! {
 
     unsafe { setup_apic(rsdp_addr) };
 
+    // Initialize PS/2 keyboard
+    ps2::init().expect("failed to initialize PS/2 subsystem");
+
     // Initialize PCIe subsystem
-    pci::init_pci(rsdp_addr).expect("failed to initialize PCIe subsystem");
+    //pci::init_pci(rsdp_addr).expect("failed to initialize PCIe subsystem");
 
     // List all discovered PCIe devices
-    list_pcie_devices();
-    usb::init();
+    //list_pcie_devices();
+    //usb_init();
 
     #[cfg(test)]
     {
@@ -172,11 +176,14 @@ unsafe extern "C" fn kernel_main() -> ! {
 
     #[cfg(not(test))]
     {
+        use crate::shell::task::locos_shell;
+
         kcreate_task(tprint_welcome, "print welcome message");
-        //kcreate_task(print_stuff, "print stuff");
+        kcreate_task(locos_shell, "locos shell");
         kinit_multitasking();
 
         x86_64::instructions::interrupts::enable();
+
         unsafe {
             core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR);
         }

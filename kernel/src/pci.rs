@@ -68,29 +68,23 @@ impl PciManager {
     pub fn init(&mut self, rsdp_addr: usize) -> Result<(), PciError> {
         info!("Initializing PCIe subsystem");
 
-        // Parse MCFG table to get ECAM regions
         self.ecam_regions = mcfg::parse_mcfg_table(rsdp_addr)?;
         info!("Found {} ECAM regions", self.ecam_regions.len());
 
-        // Calculate total memory that will be mapped
         let total_size = mcfg::calculate_total_ecam_size(&self.ecam_regions);
         info!("Total ECAM mapping size: {} MB", total_size >> 20);
 
-        // Map entire ECAM regions to virtual memory
         for region in &mut self.ecam_regions {
             mcfg::map_ecam_region(region)?;
         }
 
         info!("All ECAM regions mapped successfully");
 
-        // Enumerate all PCIe devices
         self.enumerate_devices()?;
         info!("Discovered {} PCIe devices", self.devices.len());
 
-        // Check BAR assignment status
         self.check_bar_assignment();
 
-        // Initialize MSI-X for supported devices
         self.msix_devices = msi::init_msix_devices(&self.devices)?;
 
         Ok(())
@@ -98,7 +92,6 @@ impl PciManager {
 
     /// Enumerate all PCIe devices across all buses
     fn enumerate_devices(&mut self) -> Result<(), PciError> {
-        // Clone the regions to avoid borrowing issues
         let regions = self.ecam_regions.clone();
         for ecam_region in &regions {
             for bus in ecam_region.start_bus..=ecam_region.end_bus {

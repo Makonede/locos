@@ -232,8 +232,8 @@ impl MsiXInfo {
         Ok(self)
     }
 
-    /// Zero the PBA (builder pattern)
-    pub fn zero_pba_builder(self) -> Result<Self, PciError> {
+    /// Zero the PBA
+    pub fn zero_pba(self) -> Result<Self, PciError> {
         if let Some(pba_addr) = self.pba_virtual_addr {
             let pba_bytes = self.table_size.div_ceil(8);
             unsafe {
@@ -244,8 +244,8 @@ impl MsiXInfo {
         Ok(self)
     }
 
-    /// Allocate vectors (builder pattern)
-    pub fn allocate_vectors_builder(mut self, num_vectors: u16, base_vector: u8) -> Result<Self, PciError> {
+    /// Allocate vectors
+    pub fn allocate_vectors(mut self, num_vectors: u16, base_vector: u8) -> Result<Self, PciError> {
         if num_vectors > self.table_size {
             return Err(PciError::MsiXSetupFailed);
         }
@@ -289,8 +289,8 @@ impl MsiXInfo {
         Ok(self)
     }
 
-    /// Enable MSI-X (builder pattern)
-    pub fn enable_builder(self) -> Result<Self, PciError> {
+    /// Enable MSI-X
+    pub fn enable(self) -> Result<Self, PciError> {
         let mut control = read_config_u16(
             &self.device.ecam_region,
             self.device.bus,
@@ -318,91 +318,11 @@ impl MsiXInfo {
         Ok(self)
     }
 
-    /// Zero the pba
-    pub fn zero_pba(&self) -> Result<(), PciError> {
-        if let Some(pba_addr) = self.pba_virtual_addr {
-            let pba_bytes = self.table_size.div_ceil(8);
-            unsafe {
-                write_bytes(pba_addr as *mut u8, 0, pba_bytes as usize);
-            }
-        }
 
-        Ok(())
-    }
 
-    /// Allocate and configure MSI-X vectors
-    pub fn allocate_vectors(&mut self, num_vectors: u16, base_vector: u8) -> Result<(), PciError> {
-        if num_vectors > self.table_size {
-            return Err(PciError::MsiXSetupFailed);
-        }
 
-        self.vectors.clear();
 
-        for i in 0..num_vectors {
-            let vector = MsiXVector {
-                index: i,
-                vector: base_vector + i as u8,
-                enabled: false,
-            };
-            self.vectors.push(vector);
-        }
 
-        // Configure each vector in the table
-        if let Some(table_addr) = self.table_virtual_addr {
-            for vector in &self.vectors {
-                let entry_addr = table_addr
-                    + (vector.index as u64 * core::mem::size_of::<MsiXTableEntry>() as u64);
-                let mut entry = MsiXTableEntry::new();
-
-                let msi_address = calculate_msi_address(0); // CPU 0 for now
-                let msi_data = calculate_msi_data(vector.vector);
-
-                entry.set_address(msi_address);
-                entry.set_data(msi_data);
-                entry.mask(); // Start masked
-
-                unsafe {
-                    core::ptr::write_volatile(entry_addr as *mut MsiXTableEntry, entry);
-                }
-            }
-        }
-
-        info!(
-            "Allocated {} MSI-X vectors for device {:02x}:{:02x}.{}",
-            num_vectors, self.device.bus, self.device.device, self.device.function
-        );
-
-        Ok(())
-    }
-
-    /// Enable MSI-X for this device
-    pub fn enable(&mut self) -> Result<(), PciError> {
-        let mut control = read_config_u16(
-            &self.device.ecam_region,
-            self.device.bus,
-            self.device.device,
-            self.device.function,
-            self.cap_offset + msix_offsets::MESSAGE_CONTROL,
-        );
-
-        control |= msix_control_bits::MSI_X_ENABLE;
-
-        write_config_u16(
-            &self.device.ecam_region,
-            self.device.bus,
-            self.device.device,
-            self.device.function,
-            self.cap_offset + msix_offsets::MESSAGE_CONTROL,
-            control,
-        );
-
-        info!(
-            "Enabled MSI-X for device {:02x}:{:02x}.{}",
-            self.device.bus, self.device.device, self.device.function
-        );
-
-        Ok(())
-    }
 
     /// Disable MSI-X for this device
     pub fn disable(&mut self) -> Result<(), PciError> {
@@ -626,9 +546,9 @@ pub fn setup_msix(
 
     MsiXInfo::from_device(device, cap as u16)?
         .map_structures()?
-        .zero_pba_builder()?
-        .allocate_vectors_builder(num_vectors, base_vector)?
-        .enable_builder()
+        .zero_pba()?
+        .allocate_vectors(num_vectors, base_vector)?
+        .enable()
 }
 
 /// Initialize MSI-X for all devices that support it

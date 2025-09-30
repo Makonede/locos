@@ -37,7 +37,10 @@ pub fn find_xhci_devices() -> Vec<PciDevice> {
 /// at the end, populates the XHCI_REGS static.
 pub fn xhci_init() {
     let devices = find_xhci_devices();
-    let primary_device = devices.first().expect("No XHCI devices found");
+    let Some(primary_device) = devices.first() else {
+        info!("No XHCI devices found");
+        return;
+    };
 
     assert!(
         primary_device.supports_msix(),

@@ -38,6 +38,8 @@ const LAPIC_ERROR_VECTOR: u8 = 0x31;
 const LAPIC_SPURIOUS_VECTOR: u8 = 0xFF;
 const IOAPIC_TIMER_VECTOR: u8 = 0x20;
 const IOAPIC_TIMER_INPUT: u8 = 0;
+const KEYBOARD_VECTOR: u8 = 0x21;
+const KEYBOARD_IRQ: u8 = 1;
 const TIMER_RELOAD: u16 = (1193182u32 / 20) as u16;
 
 /// Interrupt handler for the PIT.
@@ -59,6 +61,14 @@ extern "x86-interrupt" fn spurious_handler(_stack_frame: InterruptStackFrame) {
 
 extern "x86-interrupt" fn lapic_error_handler(_stack_frame: InterruptStackFrame) {
     warn!("error interrupt received");
+
+    unsafe {
+        Msr::new(X2APIC_EOI_MSR).write(0);
+    };
+}
+
+extern "x86-interrupt" fn keyboard_handler(_stack_frame: InterruptStackFrame) {
+    crate::ps2::keyboard::handle_interrupt();
 
     unsafe {
         Msr::new(X2APIC_EOI_MSR).write(0);
@@ -104,6 +114,7 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
             .set_handler_addr(VirtAddr::new(schedule as usize as u64));
         (&mut (*IDT.as_mut_ptr()))[LAPIC_ERROR_VECTOR].set_handler_fn(lapic_error_handler);
         (&mut (*IDT.as_mut_ptr()))[LAPIC_SPURIOUS_VECTOR].set_handler_fn(spurious_handler);
+        (&mut (*IDT.as_mut_ptr()))[KEYBOARD_VECTOR].set_handler_fn(keyboard_handler);
     }
 
     unsafe { final_lapic.enable() };
@@ -139,6 +150,8 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
         .iter_mut()
         .find(|x| x.irq == IOAPIC_TIMER_INPUT);
 
+    debug!("Timer override: {:?}", timer_override);
+
     let timer_gsi = if let Some(timer_override) = timer_override {
         timer_override.global_system_interrupt
     } else {
@@ -149,6 +162,19 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
         setup_pit_timer(TIMER_RELOAD);
     }
     setup_ioapic_timer(&mut ioapics, timer_gsi, unsafe { final_lapic.id() } as u8);
+
+    let keyboard_override = interrupt_source_overrides
+        .iter()
+        .find(|x| x.irq == KEYBOARD_IRQ);
+
+
+    let keyboard_gsi = if let Some(keyboard_override) = keyboard_override {
+        keyboard_override.global_system_interrupt
+    } else {
+        KEYBOARD_IRQ as u32
+    };
+
+    setup_ioapic_keyboard(&mut ioapics, keyboard_gsi, unsafe { final_lapic.id() } as u8);
 
     info!("apic initialized with {} IO APICs", ioapic_addrs.len());
 }
@@ -187,6 +213,43 @@ fn setup_ioapic_timer(ioapics: &mut [(x2apic::ioapic::IoApic, u32)], timer_gsi: 
     }
 
     debug!("IOAPIC timer setup");
+}
+
+/// Configure the IOAPIC keyboard interrupt
+fn setup_ioapic_keyboard(ioapics: &mut [(x2apic::ioapic::IoApic, u32)], keyboard_gsi: u32, lapic_id: u8) {
+    info!("Setting up IOAPIC keyboard interrupt: GSI={}, LAPIC_ID={}", keyboard_gsi, lapic_id);
+
+    for (ioapic, gsi_base) in ioapics.iter_mut() {
+        if !(*gsi_base..*gsi_base + unsafe { ioapic.max_table_entry() } as u32 + 1)
+            .contains(&keyboard_gsi)
+        {
+            continue;
+        }
+
+        info!("Configuring keyboard interrupt on IOAPIC with GSI base {}", gsi_base);
+
+        let mut entry = RedirectionTableEntry::default();
+        entry.set_vector(KEYBOARD_VECTOR);
+        entry.set_dest(lapic_id);
+        entry.set_mode(IrqMode::Fixed);
+        entry.set_flags(IrqFlags::MASKED);
+
+        unsafe { ioapic.set_table_entry((keyboard_gsi - *gsi_base) as u8, entry) };
+
+        info!("Keyboard interrupt entry configured, now enabling...");
+    }
+
+    for (ioapic, gsi_base) in ioapics.iter_mut() {
+        if !(*gsi_base..*gsi_base + unsafe { ioapic.max_table_entry() } as u32 + 1)
+            .contains(&keyboard_gsi)
+        {
+            continue;
+        }
+        unsafe { ioapic.enable_irq((keyboard_gsi - *gsi_base) as u8) };
+        info!("Keyboard interrupt enabled on IOAPIC");
+    }
+
+    info!("IOAPIC keyboard interrupt setup complete");
 }
 
 /// Set up the PIT (Programmable Interval Timer) channel 0 in mode 2 (rate generator).

@@ -92,7 +92,7 @@ pub fn kcreate_task(task_ptr: fn() -> !, name: &str) {
 
             interrupt_rip: task_ptr as usize as u64,
             interrupt_cs: CS::get_reg().0 as u64,
-            interrupt_rflags: rflags::read_raw(),
+            interrupt_rflags: rflags::read_raw() | 0x200,
             interrupt_rsp: stack_start.as_ptr() as u64,
             interrupt_ss: SS::get_reg().0 as u64,
         },
