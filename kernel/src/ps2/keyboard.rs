@@ -148,6 +148,7 @@ impl ScanCode {
 
             ScanCode::Space => Some(' '),
             ScanCode::Enter => Some('\n'),
+            ScanCode::Backspace => Some('\x08'),
 
             _ => None,
         }

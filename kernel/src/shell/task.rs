@@ -17,7 +17,11 @@ pub fn locos_shell() -> ! {
 
         if let Some(KeyEvent::KeyDown(scancode)) = event
             && let Some(character) = scancode.to_char(state.shift_pressed(), state.caps_lock) {
-                print!("{}", character);
+                if character == '\x08' {
+                    print!("\x08 \x08");
+                } else {
+                    print!("{}", character);
+                }
             } else {
                 core::hint::spin_loop();
             }
