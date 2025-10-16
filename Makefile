@@ -4,6 +4,9 @@ MAKEFLAGS += -rR
 
 override QEMUFLAGS := -m 2G -serial stdio -no-reboot -no-shutdown -enable-kvm -smp 2 -cpu host,+x2apic -machine q35,accel=kvm
 
+override NVME_IMG := nvme-disk.img
+override NVME_SIZE := 4G
+
 override IMAGE_NAME := locos
 
 override BUILD_DIR := build
@@ -13,21 +16,25 @@ override INPUT := kernel.elf
 all: $(IMAGE_NAME).iso
 
 .PHONY: run
-run: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME).iso
+run: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME).iso $(NVME_IMG)
 	qemu-system-x86_64 \
 		-M q35 \
 		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-x86_64.fd,readonly=on \
 		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-x86_64.fd \
 		-cdrom $(IMAGE_NAME).iso \
+		-drive file=$(NVME_IMG),if=none,id=nvme0 \
+		-device nvme,serial=deadbeef,drive=nvme0 \
 		$(QEMUFLAGS)
 
 .PHONY: test
-test: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME)-test.iso
+test: ovmf/ovmf-code-x86_64.fd ovmf/ovmf-vars-x86_64.fd $(IMAGE_NAME)-test.iso $(NVME_IMG)
 	@qemu-system-x86_64 \
 		-M q35 \
 		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-x86_64.fd,readonly=on \
 		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-x86_64.fd \
 		-cdrom $(IMAGE_NAME)-test.iso \
+		-drive file=$(NVME_IMG),if=none,id=nvme0 \
+		-device nvme,serial=deadbeef,drive=nvme0 \
 		-device isa-debug-exit,iobase=0xf4,iosize=0x04 \
 		-serial stdio \
 		-display none \
@@ -53,6 +60,9 @@ ovmf/ovmf-code-x86_64.fd:
 ovmf/ovmf-vars-x86_64.fd:
 	mkdir -p ovmf
 	curl -Lo $@ https://github.com/osdev0/edk2-ovmf-nightly/releases/latest/download/ovmf-vars-x86_64.fd
+
+$(NVME_IMG):
+	qemu-img create -f raw $@ $(NVME_SIZE)
 
 limine/limine:
 	rm -rf limine
@@ -108,7 +118,11 @@ clean:
 	$(MAKE) -C kernel clean
 	rm -rf iso_root iso_root_test $(IMAGE_NAME).iso $(IMAGE_NAME)-test.iso
 
+.PHONY: clean-nvme
+clean-nvme:
+	rm -f $(NVME_IMG)
+
 .PHONY: distclean
-distclean: clean
+distclean: clean clean-nvme
 	$(MAKE) -C kernel distclean
 	rm -rf limine ovmf

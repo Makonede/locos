@@ -6,6 +6,7 @@ limine
 ovmf
 locos.iso
 locos-test.iso
+nvme-disk.img
 
 /docs
 

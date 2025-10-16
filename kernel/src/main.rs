@@ -157,15 +157,13 @@ unsafe extern "C" fn kernel_main() -> ! {
 
     unsafe { setup_apic(rsdp_addr) };
 
-    // Initialize PS/2 keyboard
     ps2::init().expect("failed to initialize PS/2 subsystem");
 
-    // Initialize PCIe subsystem
-    //pci::init_pci(rsdp_addr).expect("failed to initialize PCIe subsystem");
+    pci::init_pci(rsdp_addr).expect("failed to initialize PCIe subsystem");
 
-    // List all discovered PCIe devices
-    //list_pcie_devices();
-    //usb_init();
+    list_pcie_devices();
+
+    pci::nvme::init();
 
     #[cfg(test)]
     {

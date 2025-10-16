@@ -16,6 +16,7 @@ pub mod msi;
 pub mod vmm;
 
 pub mod usb;
+pub mod nvme;
 
 pub use usb::init;
 
