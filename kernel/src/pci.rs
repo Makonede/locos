@@ -85,9 +85,6 @@ impl PciManager {
         info!("Discovered {} PCIe devices", self.devices.len());
 
         self.check_bar_assignment();
-
-        self.msix_devices = msi::init_msix_devices(&self.devices)?;
-
         Ok(())
     }
 

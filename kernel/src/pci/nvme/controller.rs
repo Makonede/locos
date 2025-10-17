@@ -18,6 +18,7 @@ use crate::{
         device::{BarInfo, PciDevice},
         vmm::map_bar,
         config::device_classes,
+        msi::{MsiXInfo, setup_msix},
     },
     memory::FRAME_ALLOCATOR,
 };
@@ -64,6 +65,8 @@ pub struct NvmeQueue {
     pub cq_phase: bool,
     /// Queue ID
     pub queue_id: u16,
+    /// MSI-X interrupt vector for this queue (None for admin queue using polling)
+    pub interrupt_vector: Option<u8>,
 }
 
 /// NVMe namespace information
@@ -92,6 +95,8 @@ pub struct NvmeController {
     /// Controller capabilities
     pub max_queue_entries: u16,
     pub doorbell_stride: u32,
+    /// MSI-X interrupt information
+    pub msix_info: Option<MsiXInfo>,
 }
 
 impl NvmeQueue {
@@ -120,6 +125,7 @@ impl NvmeQueue {
             cq_head: 0,
             cq_phase: true,
             queue_id,
+            interrupt_vector: None,
         })
     }
     
@@ -210,10 +216,11 @@ impl NvmeController {
             namespaces: Vec::new(),
             max_queue_entries,
             doorbell_stride,
+            msix_info: None,
         };
-        
+
         controller.initialize()?;
-        
+
         Ok(controller)
     }
     
@@ -224,6 +231,8 @@ impl NvmeController {
         if self.registers.is_ready() {
             self.reset_controller()?;
         }
+
+        self.setup_msix()?;
 
         self.setup_admin_queues()?;
 
@@ -238,6 +247,24 @@ impl NvmeController {
         }
 
         info!("NVMe controller initialization complete");
+        Ok(())
+    }
+
+    /// Setup MSI-X interrupts for the controller
+    fn setup_msix(&mut self) -> Result<(), NvmeError> {
+        const NUM_VECTORS: u16 = 2;
+        const NVME_VECTOR_BASE: u8 = 0x50; // Start at vector 0x50 in MSI-X range
+
+        let mut msix_info = setup_msix(&self.pci_device, NUM_VECTORS, NVME_VECTOR_BASE)
+            .map_err(|_| NvmeError::PciError)?;
+
+        info!("MSI-X enabled for NVMe controller with {} vectors (base={:#x})",
+              NUM_VECTORS, NVME_VECTOR_BASE);
+
+        msix_info.enable_vector(0).map_err(|_| NvmeError::PciError)?;
+        msix_info.enable_vector(1).map_err(|_| NvmeError::PciError)?;
+
+        self.msix_info = Some(msix_info);
         Ok(())
     }
 
@@ -305,41 +332,16 @@ impl NvmeController {
         Err(NvmeError::ControllerEnableTimeout)
     }
 
-    /// Submit an admin command and wait for completion
+    /// Submit an admin command and yield to scheduler for completion
+    /// 
+    /// will issue msi-x interrupt when command completes
     fn submit_admin_command(&mut self, cmd: NvmeCommand) -> Result<NvmeCompletion, NvmeError> {
         // Submit command to admin queue
         let cid = self.admin_queue.submit_command(cmd)?;
 
-        // Ring doorbell for admin submission queue
         self.registers.ring_doorbell(0, false, self.admin_queue.sq_tail);
 
-        // Wait for completion
-        self.wait_for_completion(cid)
-    }
-
-    /// Wait for a specific command to complete
-    fn wait_for_completion(&mut self, expected_cid: u16) -> Result<NvmeCompletion, NvmeError> {
-        let timeout = 100000; // Busy wait iterations
-
-        for _ in 0..timeout {
-            if let Some(completion) = self.admin_queue.check_completion() {
-                self.registers.ring_doorbell(0, true, self.admin_queue.cq_head);
-
-                if completion.cid == expected_cid {
-                    if completion.is_success() {
-                        return Ok(completion);
-                    } else {
-                        return Err(NvmeError::CommandFailed(completion.status_code()));
-                    }
-                }
-            }
-            // Small delay
-            for _ in 0..1000 {
-                core::hint::spin_loop();
-            }
-        }
-
-        Err(NvmeError::CommandTimeout)
+        !unimplemented!();
     }
 
     /// Identify the controller and get basic information
@@ -437,9 +439,25 @@ impl NvmeController {
         info!("Creating I/O queues");
 
         let queue_size = core::cmp::min(self.max_queue_entries, 64);
-        let io_queue = NvmeQueue::new(1, queue_size)?;
+        let mut io_queue = NvmeQueue::new(1, queue_size)?;
 
-        let create_cq_cmd = NvmeCommand::create_io_cq(1, queue_size, io_queue.cq_phys.as_u64());
+        let msix_info = self.msix_info.as_ref()
+            .ok_or(NvmeError::PciError)?;
+
+        // Use vector 1 for I/O queue (vector 0 reserved for admin queue)
+        let io_vector = msix_info.vectors.get(1)
+            .ok_or(NvmeError::PciError)?;
+
+        io_queue.interrupt_vector = Some(io_vector.vector);
+
+        info!("Creating I/O Completion Queue with MSI-X interrupt vector {:#x}", io_vector.vector);
+        let create_cq_cmd = NvmeCommand::create_io_cq_with_interrupt(
+            1,
+            queue_size,
+            io_queue.cq_phys.as_u64(),
+            io_vector.index
+        );
+
         self.submit_admin_command(create_cq_cmd)?;
         info!("I/O Completion Queue created");
 
@@ -452,7 +470,10 @@ impl NvmeController {
         Ok(())
     }
 
-    /// Submit an I/O command and wait for completion
+    /// Submit an I/O command and yield current task to scheduler for completion
+    ///
+    /// Controller will issue an msi-x interrupt when ths command complete
+    /// The interrupt vector is configured in the I/O completion queue.
     fn submit_io_command(&mut self, cmd: NvmeCommand) -> Result<NvmeCompletion, NvmeError> {
         let io_queue = self.io_queue.as_mut().ok_or(NvmeError::NoIoQueue)?;
 
@@ -460,33 +481,11 @@ impl NvmeController {
 
         self.registers.ring_doorbell(1, false, io_queue.sq_tail);
 
-        self.wait_for_io_completion(cid)
-    }
+        // yield current task to scheduler
 
-    /// Wait for a specific I/O command to complete
-    fn wait_for_io_completion(&mut self, expected_cid: u16) -> Result<NvmeCompletion, NvmeError> {
-        let timeout = 100000; // Busy wait iterations
-        let io_queue = self.io_queue.as_mut().ok_or(NvmeError::NoIoQueue)?;
+        // then read for completion
 
-        for _ in 0..timeout {
-            if let Some(completion) = io_queue.check_completion() {
-                self.registers.ring_doorbell(1, true, io_queue.cq_head);
-
-                if completion.cid == expected_cid {
-                    if completion.is_success() {
-                        return Ok(completion);
-                    } else {
-                        return Err(NvmeError::CommandFailed(completion.status_code()));
-                    }
-                }
-            }
-            // Small delay
-            for _ in 0..1000 {
-                core::hint::spin_loop();
-            }
-        }
-
-        Err(NvmeError::CommandTimeout)
+        !unimplemented!();
     }
 
     /// Read blocks from a namespace

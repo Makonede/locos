@@ -105,6 +105,19 @@ pub fn kcreate_task(task_ptr: fn() -> !, name: &str) {
     trace!("created task {:?}", task);
 }
 
+pub fn kyield_task() {
+    interrupts::disable();
+    {
+        let mut scheduler = TASK_SCHEDULER.lock();
+        let current_task = scheduler.task_list.front_mut().unwrap();
+        current_task.state = TaskState::Waiting;
+    }
+
+    unsafe {
+        core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR, options(noreturn));
+    }
+}
+
 /// Exits a task
 ///
 /// should be called at the end of every running kernel task when it wants to terminate
@@ -158,6 +171,7 @@ enum TaskState {
     Ready,
     Running,
     Terminated,
+    Waiting,
 }
 
 /// Type of a task

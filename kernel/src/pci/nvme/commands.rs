@@ -92,7 +92,18 @@ impl NvmeCommand {
         cmd.set_opcode(opcodes::ADMIN_CREATE_IO_CQ);
         cmd.prp1 = buffer_addr;
         cmd.cdw10 = ((queue_size - 1) as u32) << 16 | (queue_id as u32); // QSIZE | QID
-        cmd.cdw11 = 1;                   // PC = 1 (Physically Contiguous)
+        cmd.cdw11 = 1;                   // PC = 1 (Physically Contiguous), IEN = 0 (no interrupts)
+        cmd
+    }
+
+    /// Create a CREATE I/O Completion Queue command with MSI-X interrupt
+    pub fn create_io_cq_with_interrupt(queue_id: u16, queue_size: u16, buffer_addr: u64, interrupt_vector: u16) -> Self {
+        let mut cmd = Self::new();
+        cmd.set_opcode(opcodes::ADMIN_CREATE_IO_CQ);
+        cmd.prp1 = buffer_addr;
+        cmd.cdw10 = ((queue_size - 1) as u32) << 16 | (queue_id as u32); // QSIZE | QID
+        // PC = 1 (Physically Contiguous), IEN = 1 (interrupts enabled)
+        cmd.cdw11 = ((interrupt_vector as u32) << 16) | (1 << 1) | 1; // IV | IEN | PC
         cmd
     }
     

@@ -289,7 +289,7 @@ impl MsiXInfo {
         Ok(self)
     }
 
-    /// Enable MSI-X
+    /// Enable MSI-X for device
     pub fn enable(self) -> Result<Self, PciError> {
         let mut control = read_config_u16(
             &self.device.ecam_region,
@@ -317,12 +317,6 @@ impl MsiXInfo {
 
         Ok(self)
     }
-
-
-
-
-
-
 
     /// Disable MSI-X for this device
     pub fn disable(&mut self) -> Result<(), PciError> {
@@ -534,7 +528,7 @@ fn calculate_msi_data(vector: u8) -> u32 {
     vector as u32 // Edge-triggered, fixed delivery mode
 }
 
-/// Setup MSI-X for a device using builder pattern
+/// Setup MSI-X for a device
 pub fn setup_msix(
     device: &PciDevice,
     num_vectors: u16,
@@ -549,77 +543,4 @@ pub fn setup_msix(
         .zero_pba()?
         .allocate_vectors(num_vectors, base_vector)?
         .enable()
-}
-
-/// Initialize MSI-X for all devices that support it
-pub fn init_msix_devices(devices: &[PciDevice]) -> Result<Vec<MsiXInfo>, PciError> {
-    use crate::{info, warn};
-
-    const MSIX_VECTOR_BASE: u8 = 0x40;
-    const MSIX_VECTOR_MAX: u8 = 0x7F;
-    let mut next_vector = MSIX_VECTOR_BASE;
-
-    let mut msix_devices = Vec::new();
-    let mut msix_count = 0;
-    let mut msix_vector_count = 0;
-
-    for device in devices {
-        if !device.supports_msix() {
-            continue;
-        }
-
-        let msix_cap = device.find_capability(capability_ids::MSI_X).unwrap();
-        let control = read_config_u16(
-            &device.ecam_region,
-            device.bus,
-            device.device,
-            device.function,
-            msix_cap as u16 + msix_offsets::MESSAGE_CONTROL,
-        );
-        let table_size = (control & msix_control_bits::TABLE_SIZE_MASK) + 1;
-
-        let num_vectors = core::cmp::min(table_size, 4);
-
-        // Skip if we don't have enough vectors available
-        if next_vector + num_vectors as u8 > MSIX_VECTOR_MAX {
-            warn!(
-                "Not enough MSI-X vectors available for device {:02x}:{:02x}.{} (needs {}, {} available)",
-                device.bus, device.device, device.function, num_vectors, MSIX_VECTOR_MAX - next_vector + 1
-            );
-            continue;
-        }
-
-        match setup_msix(device, num_vectors, next_vector) {
-            Ok(msix_info) => {
-                info!(
-                    "MSI-X initialized for device {:02x}:{:02x}.{} [{:04x}:{:04x}]: {} vectors (base={})",
-                    device.bus, device.device, device.function,
-                    device.vendor_id, device.device_id,
-                    num_vectors, next_vector
-                );
-
-                next_vector += num_vectors as u8;
-                msix_count += 1;
-                msix_vector_count += num_vectors;
-                msix_devices.push(msix_info);
-            }
-            Err(_e) => {
-                warn!(
-                    "Failed to initialize MSI-X for device {:02x}:{:02x}.{}: {:?}",
-                    device.bus, device.device, device.function, _e
-                );
-            }
-        }
-    }
-
-    if msix_count > 0 {
-        info!(
-            "MSI-X initialization complete: {} devices configured with {} total vectors",
-            msix_count, msix_vector_count
-        );
-    } else {
-        info!("No MSI-X capable devices found or configured");
-    }
-
-    Ok(msix_devices)
 }
