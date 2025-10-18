@@ -1,6 +1,6 @@
 use core::{arch::naked_asm, ptr::NonNull};
 
-use alloc::collections::vec_deque::VecDeque;
+use alloc::collections::{btree_map::BTreeMap, vec_deque::VecDeque};
 use spin::Mutex;
 use x86_64::{
     instructions::interrupts::{self},
@@ -13,7 +13,7 @@ use x86_64::{
 };
 
 use crate::{
-    debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR, trace,
+    debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, pci::device::BarInfo, tasks::kernelslab::STACK_ALLOCATOR, trace
 };
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
@@ -105,17 +105,31 @@ pub fn kcreate_task(task_ptr: fn() -> !, name: &str) {
     trace!("created task {:?}", task);
 }
 
-pub fn kyield_task() {
+/// Yields the current task to the scheduler, waiting for an interrupt
+pub fn kyield_task(interrupt: u8) {
     interrupts::disable();
     {
         let mut scheduler = TASK_SCHEDULER.lock();
         let current_task = scheduler.task_list.front_mut().unwrap();
-        current_task.state = TaskState::Waiting;
+        current_task.state = TaskState::Waiting(WaitReason::Interrupt(interrupt));
     }
+    interrupts::enable();
 
     unsafe {
-        core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR, options(noreturn));
+        core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR);
     }
+}
+
+/// wakes all tasks waiting for specified interrupt
+/// 
+/// O(n) but doesnt matter in this stage
+pub fn wake_tasks(interrupt: u8) {
+    let mut scheduler = TASK_SCHEDULER.lock();
+    scheduler
+        .task_list
+        .iter_mut()
+        .filter(|x| x.state == TaskState::Waiting(WaitReason::Interrupt(interrupt)))
+        .for_each(|x| x.state = TaskState::Ready);
 }
 
 /// Exits a task
@@ -171,7 +185,13 @@ enum TaskState {
     Ready,
     Running,
     Terminated,
-    Waiting,
+    Waiting(WaitReason),
+}
+
+/// Why are we waiting
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WaitReason {
+    Interrupt(u8),
 }
 
 /// Type of a task
@@ -269,6 +289,12 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
 
     if current_task.state == TaskState::Terminated {
         trace!("task ended at {:#X}", current_task.regs.interrupt_rsp);
+        if current_task.stack_start != NonNull::dangling() {
+            STACK_ALLOCATOR.lock().return_stack(current_task.stack_start);
+        }
+    } else if let TaskState::Waiting(WaitReason::Interrupt(_interrupt)) = current_task.state {
+        current_task.regs = unsafe { *current_task_context };
+        scheduler.task_list.push_back(current_task);
     } else {
         current_task.state = TaskState::Ready;
         current_task.regs = unsafe { *current_task_context };

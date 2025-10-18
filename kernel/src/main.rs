@@ -163,8 +163,6 @@ unsafe extern "C" fn kernel_main() -> ! {
 
     list_pcie_devices();
 
-    pci::nvme::init();
-
     #[cfg(test)]
     {
         // Clear console and run tests before starting kernel tasks
@@ -185,6 +183,8 @@ unsafe extern "C" fn kernel_main() -> ! {
         unsafe {
             core::arch::asm!("int {}", const LAPIC_TIMER_VECTOR);
         }
+
+        pci::nvme::init();
     }
 
     hcf();

@@ -1,4 +1,4 @@
-use crate::{error, info, tasks::scheduler::schedule, warn};
+use crate::{error, info, pci::nvme::{NVME_ADMIN_VECTOR, NVME_IO_VECTOR}, tasks::scheduler::schedule, warn};
 use acpi::{
     AcpiHandler, AcpiTables, InterruptModel,
     handler::PhysicalMapping,
@@ -75,6 +75,22 @@ extern "x86-interrupt" fn keyboard_handler(_stack_frame: InterruptStackFrame) {
     };
 }
 
+extern "x86-interrupt" fn nvme_admin_handler(_stack_frame: InterruptStackFrame) {
+    crate::pci::nvme::handle_admin_interrupt();
+
+    unsafe {
+        Msr::new(X2APIC_EOI_MSR).write(0);
+    };
+}
+
+extern "x86-interrupt" fn nvme_io_handler(_stack_frame: InterruptStackFrame) {
+    crate::pci::nvme::handle_io_interrupt();
+
+    unsafe {
+        Msr::new(X2APIC_EOI_MSR).write(0);
+    };
+}
+
 /// Sets up the Local APIC and enables it using the x2apic crate.
 ///
 /// # Safety
@@ -115,6 +131,8 @@ pub unsafe fn setup_apic(rsdp_addr: usize) {
         (&mut (*IDT.as_mut_ptr()))[LAPIC_ERROR_VECTOR].set_handler_fn(lapic_error_handler);
         (&mut (*IDT.as_mut_ptr()))[LAPIC_SPURIOUS_VECTOR].set_handler_fn(spurious_handler);
         (&mut (*IDT.as_mut_ptr()))[KEYBOARD_VECTOR].set_handler_fn(keyboard_handler);
+        (&mut (*IDT.as_mut_ptr()))[NVME_ADMIN_VECTOR].set_handler_fn(nvme_admin_handler);
+        (&mut (*IDT.as_mut_ptr()))[NVME_IO_VECTOR].set_handler_fn(nvme_io_handler);
     }
 
     unsafe { final_lapic.enable() };

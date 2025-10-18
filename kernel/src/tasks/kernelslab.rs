@@ -4,7 +4,7 @@ use spin::Mutex;
 use x86_64::{
     VirtAddr,
     structures::paging::{
-        FrameAllocator, FrameDeallocator, Mapper, Page, PageTableFlags, Size4KiB,
+        FrameAllocator, Mapper, Page, PageTableFlags,
     },
 };
 
@@ -86,35 +86,18 @@ impl KernelSlabAlloc {
         NonNull::new(stack_top as *mut ()).unwrap()
     }
 
-    /// deallocate a stack and guard page
+    /// deallocate a stack
+    ///
+    /// This does NOT unmap the pages or return frames to the allocator.
+    /// The pages remain mapped but the block is marked as free for reuse.
     pub fn return_stack(&mut self, stack_top: NonNull<()>) {
-        let block_start = (stack_top.as_ptr() as u64 + 1) - (KSTACK_SIZE as u64 * 0x1000);
-        let block_index = (block_start - KERNEL_TASKS_START) / (KSTACK_SIZE as u64 * 0x1000);
+        let stack_addr = stack_top.as_ptr() as u64;
+
+        let offset = stack_addr - KERNEL_TASKS_START;
+        let block_index = (offset & !(KSTACK_SIZE as u64 * 0x1000 - 1)) / (KSTACK_SIZE as u64 * 0x1000);
 
         assert!(block_index < 128 && (self.block_bitmap & (1 << block_index)) != 0);
 
-        let mut page_table = PAGE_TABLE.lock();
-        let mapper = page_table.as_mut().unwrap();
-
-        // Unmap stack pages (skip guard page at offset 0)
-        for page_addr in
-            (block_start + 0x1000..block_start + (KSTACK_SIZE as u64 * 0x1000)).step_by(0x1000)
-        {
-            unsafe {
-                if let Ok((frame, flush)) = mapper.unmap(Page::<Size4KiB>::containing_address(
-                    VirtAddr::new(page_addr),
-                )) {
-                    flush.flush();
-                    FRAME_ALLOCATOR
-                        .lock()
-                        .as_mut()
-                        .unwrap()
-                        .deallocate_frame(frame);
-                }
-            }
-        }
-
-        debug!("Deallocated stack at {:#x}", block_start);
         self.block_bitmap &= !(1 << block_index);
     }
 }

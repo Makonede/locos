@@ -12,19 +12,26 @@ use super::{
     commands::{NvmeCommand, NvmeCompletion, IdentifyController, IdentifyNamespace},
 };
 use crate::{
-    info, warn, debug,
-    pci::{
-        PCI_MANAGER,
-        device::{BarInfo, PciDevice},
-        vmm::map_bar,
-        config::device_classes,
-        msi::{MsiXInfo, setup_msix},
-    },
-    memory::FRAME_ALLOCATOR,
+    debug, info, memory::FRAME_ALLOCATOR, pci::{
+        PCI_MANAGER, config::device_classes, device::{BarInfo, PciDevice}, msi::{MsiXInfo, setup_msix}, vmm::map_bar
+    }, tasks::scheduler::kyield_task, warn
 };
 
 /// Global NVMe controller instance
 pub static NVME_CONTROLLER: Mutex<Option<NvmeController>> = Mutex::new(None);
+
+pub const NVME_VECTOR_BASE: u8 = 0x50;
+pub const NVME_ADMIN_VECTOR: u8 = NVME_VECTOR_BASE;
+pub const NVME_IO_VECTOR: u8 = NVME_VECTOR_BASE + 1;
+pub const NVME_VECTOR_NUM: u16 = 2;
+
+pub fn handle_admin_interrupt() {
+    crate::tasks::scheduler::wake_tasks(NVME_ADMIN_VECTOR);
+}
+
+pub fn handle_io_interrupt() {
+    crate::tasks::scheduler::wake_tasks(NVME_IO_VECTOR);
+}
 
 /// NVMe controller errors
 #[derive(Debug, Clone, Copy)]
@@ -34,6 +41,7 @@ pub enum NvmeError {
     ControllerEnableTimeout,
     QueueFull,
     CommandTimeout,
+    CommandNotCompleted,
     CommandFailed(u16),
     AllocationFailed,
     InvalidNamespace,
@@ -252,14 +260,11 @@ impl NvmeController {
 
     /// Setup MSI-X interrupts for the controller
     fn setup_msix(&mut self) -> Result<(), NvmeError> {
-        const NUM_VECTORS: u16 = 2;
-        const NVME_VECTOR_BASE: u8 = 0x50; // Start at vector 0x50 in MSI-X range
-
-        let mut msix_info = setup_msix(&self.pci_device, NUM_VECTORS, NVME_VECTOR_BASE)
+        let mut msix_info = setup_msix(&self.pci_device, NVME_VECTOR_NUM, NVME_VECTOR_BASE)
             .map_err(|_| NvmeError::PciError)?;
 
         info!("MSI-X enabled for NVMe controller with {} vectors (base={:#x})",
-              NUM_VECTORS, NVME_VECTOR_BASE);
+              NVME_VECTOR_NUM, NVME_VECTOR_BASE);
 
         msix_info.enable_vector(0).map_err(|_| NvmeError::PciError)?;
         msix_info.enable_vector(1).map_err(|_| NvmeError::PciError)?;
@@ -341,7 +346,15 @@ impl NvmeController {
 
         self.registers.ring_doorbell(0, false, self.admin_queue.sq_tail);
 
-        !unimplemented!();
+        kyield_task(NVME_ADMIN_VECTOR);
+
+        let completion = self.admin_queue.check_completion().ok_or(NvmeError::CommandNotCompleted)?;
+
+        if !completion.is_success() {
+            return Err(NvmeError::CommandFailed(completion.status_code()));
+        }
+
+        Ok(completion)
     }
 
     /// Identify the controller and get basic information
@@ -444,7 +457,6 @@ impl NvmeController {
         let msix_info = self.msix_info.as_ref()
             .ok_or(NvmeError::PciError)?;
 
-        // Use vector 1 for I/O queue (vector 0 reserved for admin queue)
         let io_vector = msix_info.vectors.get(1)
             .ok_or(NvmeError::PciError)?;
 
@@ -481,11 +493,15 @@ impl NvmeController {
 
         self.registers.ring_doorbell(1, false, io_queue.sq_tail);
 
-        // yield current task to scheduler
+        kyield_task(NVME_IO_VECTOR);
 
-        // then read for completion
+        let completion = io_queue.check_completion().ok_or(NvmeError::CommandNotCompleted)?;
 
-        !unimplemented!();
+        if !completion.is_success() {
+            return Err(NvmeError::CommandFailed(completion.status_code()));
+        }
+
+        Ok(completion)
     }
 
     /// Read blocks from a namespace
