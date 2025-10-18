@@ -14,7 +14,7 @@ use crate::debug;
 
 use super::{
     PciError,
-    mcfg::{EcamRegion, read_config_u8, read_config_u16, read_config_u32, write_config_u32},
+    mcfg::{EcamRegion, read_config_u8, read_config_u16, read_config_u32},
 };
 
 /// PCIe configuration space offsets

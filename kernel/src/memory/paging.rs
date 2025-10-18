@@ -1,7 +1,7 @@
 use core::mem::{align_of, size_of};
 use core::ptr::NonNull;
 
-use crate::{debug, trace};
+use crate::debug;
 use crate::{
     info,
     memory::freelist::{DoubleFreeList, DoubleFreeListLink, DoubleFreeListNode},

@@ -1,4 +1,3 @@
-use alloc::{boxed::Box, vec::Vec};
 
 #[test_case]
 fn test_simple_alloc() {

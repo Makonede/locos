@@ -38,7 +38,7 @@ extern crate alloc;
 
 use core::{arch::asm, panic::PanicInfo};
 
-use alloc::{format, vec::Vec};
+use alloc::vec::Vec;
 use gdt::init_gdt;
 use interrupts::{init_idt, setup_apic};
 use limine::{
@@ -56,13 +56,6 @@ use memory::{
 use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
 use x86_64::{VirtAddr, registers::debug};
 
-use crate::{
-    pci::{
-        PCI_MANAGER,
-        device::{IoBar, MemoryBar},
-        usb,
-    }, tasks::scheduler::kexit_task
-};
 
 #[cfg(not(test))]
 use crate::{

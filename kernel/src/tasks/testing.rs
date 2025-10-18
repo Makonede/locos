@@ -1,6 +1,6 @@
 use crate::{
-    println, serial_println,
-    tasks::scheduler::{kcreate_task, kexit_task},
+    println,
+    tasks::scheduler::kexit_task,
 };
 
 #[test_case]

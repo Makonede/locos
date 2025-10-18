@@ -1,6 +1,6 @@
 use core::{arch::naked_asm, ptr::NonNull};
 
-use alloc::collections::{btree_map::BTreeMap, vec_deque::VecDeque};
+use alloc::collections::vec_deque::VecDeque;
 use spin::Mutex;
 use x86_64::{
     instructions::interrupts::{self},
@@ -13,7 +13,7 @@ use x86_64::{
 };
 
 use crate::{
-    debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, pci::device::BarInfo, tasks::kernelslab::STACK_ALLOCATOR, trace
+    debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR, trace
 };
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
