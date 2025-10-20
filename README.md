@@ -11,3 +11,26 @@ Make sure that `make` is installed
 ```sh
 make
 ```
+
+## Checklist
+
+- IO
+  - [x] PS/2 Keyboard
+  - [x] Serial
+  - [x] Framebuffer console
+  - [x] PCIe
+  - [x] NVMe
+  - [ ] fs
+  - [ ] USB
+  - [ ] Network
+  - [ ] shell
+- Tasks
+  - [x] Round robin
+  - [x] Preemptive
+  - [x] Yielding
+  - [ ] Priority
+  - [ ] Multicore/smp
+  - [ ] Userspace
+- Misc
+  - [ ] DOOM
+
