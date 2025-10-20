@@ -20,7 +20,6 @@ macro_rules! print {
 #[macro_export]
 macro_rules! error {
     ($($arg:tt)*) => {
-        $crate::println!("\x1B[31mERROR:\x1B[0m {}", format_args!($($arg)*));
         $crate::serial_println!("\x1B[31mERROR:\x1B[0m {}", format_args!($($arg)*));
     };
 }
@@ -37,7 +36,6 @@ macro_rules! error {
 #[macro_export]
 macro_rules! warn {
     ($($arg:tt)*) => {
-        $crate::println!("\x1B[33mWARN:\x1B[0m {}", format_args!($($arg)*));
         $crate::serial_println!("\x1B[33mWARN:\x1B[0m {}", format_args!($($arg)*));
     };
 }
@@ -54,7 +52,6 @@ macro_rules! warn {
 #[macro_export]
 macro_rules! info {
     ($($arg:tt)*) => {
-        $crate::println!("\x1B[32mINFO:\x1B[0m {}", format_args!($($arg)*));
         $crate::serial_println!("\x1B[32mINFO:\x1B[0m {}", format_args!($($arg)*));
     };
 }
@@ -71,7 +68,6 @@ macro_rules! info {
 #[macro_export]
 macro_rules! debug {
     ($($arg:tt)*) => {
-        $crate::println!("\x1B[32mDEBUG:\x1B[0m {}", format_args!($($arg)*));
         $crate::serial_println!("\x1B[32mDEBUG:\x1B[0m {}", format_args!($($arg)*));
     };
 }
@@ -88,7 +84,6 @@ macro_rules! debug {
 #[macro_export]
 macro_rules! trace {
     ($($arg:tt)*) => {
-        $crate::println!("\x1B[36mTRACE:\x1B[0m {}", format_args!($($arg)*));
         $crate::serial_println!("\x1B[36mTRACE:\x1B[0m {}", format_args!($($arg)*));
     };
 }
