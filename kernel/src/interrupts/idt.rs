@@ -1,6 +1,6 @@
-use crate::info;
+use crate::{info, tasks::scheduler::try_grow_user_stack};
 use spin::Lazy;
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+use x86_64::{registers::control::Cr2, structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode}};
 
 use crate::{println, serial_println};
 
@@ -39,9 +39,16 @@ extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
 ) {
+    let fault_addr = Cr2::read().expect("Failed to read CR2");
+
+    if error_code.contains(PageFaultErrorCode::USER_MODE)
+        && unsafe { try_grow_user_stack(fault_addr).is_ok() } {
+            return;
+        }
+
     panic!(
-        "EXCEPTION: PAGE FAULT\n{:#?}\nWith error: {:#?}",
-        stack_frame, error_code,
+        "EXCEPTION: PAGE FAULT at {:#x}\n{:#?}\nWith error: {:#?}",
+        fault_addr, stack_frame, error_code,
     );
 }
 

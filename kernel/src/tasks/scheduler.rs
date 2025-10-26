@@ -1,19 +1,26 @@
-use core::{arch::naked_asm, ptr::NonNull};
+use core::{arch::naked_asm, error::Error};
 
-use alloc::collections::vec_deque::VecDeque;
+use alloc::{boxed::Box, collections::vec_deque::VecDeque};
 use spin::Mutex;
 use x86_64::{
+    VirtAddr,
     instructions::interrupts::{self},
     registers::{
         control::Cr3,
         rflags::{self},
         segmentation::{CS, SS, Segment},
     },
-    structures::paging::PhysFrame,
+    structures::paging::{FrameAllocator, FrameDeallocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame},
 };
 
 use crate::{
-    debug, info, interrupts::apic::LAPIC_TIMER_VECTOR, tasks::kernelslab::STACK_ALLOCATOR, trace
+    debug,
+    gdt::{USER_CODE_SEGMENT_INDEX, USER_DATA_SEGMENT_INDEX},
+    info,
+    interrupts::apic::LAPIC_TIMER_VECTOR,
+    memory::FRAME_ALLOCATOR,
+    tasks::kernelslab::{INITIAL_STACK_PAGES, STACK_ALLOCATOR, get_user_stack},
+    trace,
 };
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
@@ -50,10 +57,11 @@ pub fn kinit_multitasking() {
 
     let mut scheduler = TASK_SCHEDULER.lock();
     let current_task = ProcessControlBlock {
-        task_type: TaskType::Kernel,
+        task_type: TaskType::Kernel {
+            stack_start: None,
+        },
         regs: current_regs,
         state: TaskState::Running,        // Mark as currently running
-        stack_start: NonNull::dangling(), // Kernel uses its own stack
         cr3: Cr3::read().0,
     };
     scheduler.task_list.push_front(current_task);
@@ -68,11 +76,13 @@ pub fn kinit_multitasking() {
 /// task should be a pointer to the function to run
 pub fn kcreate_task(task_ptr: fn() -> !, name: &str) {
     let mut stack_allocator = STACK_ALLOCATOR.lock();
-    let stack_start = stack_allocator.get_stack();
+    let stack_start = stack_allocator.get_stack().expect("Failed to allocate kernel stack");
 
     let mut scheduler = TASK_SCHEDULER.lock();
     let task = ProcessControlBlock {
-        task_type: TaskType::Kernel,
+        task_type: TaskType::Kernel {
+            stack_start: Some(stack_start),
+        },
         regs: TaskRegisters {
             rax: 0,
             rbx: 0,
@@ -93,16 +103,258 @@ pub fn kcreate_task(task_ptr: fn() -> !, name: &str) {
             interrupt_rip: task_ptr as usize as u64,
             interrupt_cs: CS::get_reg().0 as u64,
             interrupt_rflags: rflags::read_raw() | 0x200,
-            interrupt_rsp: stack_start.as_ptr() as u64,
+            interrupt_rsp: stack_start.as_u64(),
             interrupt_ss: SS::get_reg().0 as u64,
         },
         state: TaskState::Ready,
-        stack_start,
         cr3: Cr3::read().0,
     };
     scheduler.task_list.push_back(task);
     info!("created task {:?}", name);
     trace!("created task {:?}", task);
+}
+
+/// Reconstructs an OffsetPageTable from a CR3 value
+///
+/// # Safety
+/// The caller must ensure that the CR3 points to a valid page table
+unsafe fn get_user_page_table_from_cr3(cr3: PhysFrame) -> OffsetPageTable<'static> {
+    let hhdm_offset = FRAME_ALLOCATOR.lock().as_ref().unwrap().hddm_offset;
+    let l4_virt = VirtAddr::new(cr3.start_address().as_u64() + hhdm_offset);
+    let l4_table: &mut PageTable = unsafe { &mut *l4_virt.as_mut_ptr() };
+    unsafe { OffsetPageTable::new(l4_table, VirtAddr::new(hhdm_offset)) }
+}
+
+/// Recursively deallocates all page table frames in the user space portion (entries 0-255)
+/// of a page table hierarchy
+///
+/// # Safety
+/// - The caller must ensure that the page table is valid and not in use
+/// - This should only be called on user page tables, not the kernel page table
+/// - The page table must not be the currently active page table
+unsafe fn deallocate_user_page_table_recursive(table_frame: PhysFrame, level: u8) {
+    let hhdm_offset = FRAME_ALLOCATOR.lock().as_ref().unwrap().hddm_offset;
+    let table_virt = VirtAddr::new(table_frame.start_address().as_u64() + hhdm_offset);
+    let table: &PageTable = unsafe { &*table_virt.as_ptr() };
+
+    for i in 0..256 {
+        let entry = &table[i];
+
+        if entry.flags().contains(PageTableFlags::PRESENT) {
+            let child_frame = entry.frame().unwrap();
+
+            if level > 1 {
+                unsafe {
+                    deallocate_user_page_table_recursive(child_frame, level - 1);
+                }
+            }
+
+            unsafe {
+                FRAME_ALLOCATOR.lock().as_mut().unwrap().deallocate_frame(child_frame);
+            }
+        }
+    }
+}
+
+/// Creates a new user page table by copying the kernel's page table
+///
+/// Returns the physical frame of the new page table
+/// Remember to dealloc frame
+fn create_user_page_table() -> PhysFrame {
+    let mut frame_allocator = FRAME_ALLOCATOR.lock();
+    let frame_allocator = frame_allocator.as_mut().unwrap();
+
+    let new_l4_frame = frame_allocator
+        .allocate_frame()
+        .expect("failed to allocate frame for user page table");
+
+    let hhdm_offset = frame_allocator.hddm_offset;
+    let new_l4_virt = VirtAddr::new(new_l4_frame.start_address().as_u64() + hhdm_offset);
+    let new_l4_table: &mut PageTable = unsafe { &mut *new_l4_virt.as_mut_ptr() };
+
+    new_l4_table.zero();
+
+    let current_l4_frame = Cr3::read().0;
+    let current_l4_virt = VirtAddr::new(current_l4_frame.start_address().as_u64() + hhdm_offset);
+    let current_l4_table: &PageTable = unsafe { &*current_l4_virt.as_ptr() };
+
+    for i in 256..512 {
+        new_l4_table[i] = current_l4_table[i].clone();
+    }
+
+    debug!("Created user page table at {:#x}", new_l4_frame.start_address());
+    new_l4_frame
+}
+
+/// Creates a new userspace task
+///
+/// # Arguments
+/// * `entry_point` - Virtual address where the user code starts
+/// * `name` - Name of the task for debugging
+pub fn ucreate_task(entry_point: VirtAddr, name: &str) -> Result<(), Box<dyn Error>> {
+    if entry_point.as_u64() >= 0x0000_8000_0000_0000 {
+        return Err("Entry point must be in user address space (< 0x0000_8000_0000_0000)".into());
+    }
+
+    let user_cr3 = create_user_page_table();
+
+    let hhdm_offset = FRAME_ALLOCATOR.lock().as_ref().unwrap().hddm_offset;
+    let user_l4_virt = VirtAddr::new(user_cr3.start_address().as_u64() + hhdm_offset);
+    let user_l4_table: &mut PageTable = unsafe { &mut *user_l4_virt.as_mut_ptr() };
+    let mut user_page_table = unsafe { OffsetPageTable::new(user_l4_table, VirtAddr::new(hhdm_offset)) };
+
+    let stack_allocation = match get_user_stack(&mut user_page_table) {
+        Ok(alloc) => alloc,
+        Err(e) => {
+            unsafe {
+                use x86_64::structures::paging::FrameDeallocator;
+                FRAME_ALLOCATOR.lock().as_mut().unwrap().deallocate_frame(user_cr3);
+            }
+            return Err(e.into());
+        }
+    };
+
+    let mut scheduler = TASK_SCHEDULER.lock();
+    let task = ProcessControlBlock {
+        task_type: TaskType::User(UserInfo {
+            stack_start: stack_allocation.stack_start,
+            stack_end: stack_allocation.stack_end,
+            stack_size: INITIAL_STACK_PAGES,
+        }),
+        regs: TaskRegisters {
+            rax: 0,
+            rbx: 0,
+            rcx: 0,
+            rdx: 0,
+            rsi: 0,
+            rdi: 0,
+            rbp: 0,
+            r8: 0,
+            r9: 0,
+            r10: 0,
+            r11: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+
+            interrupt_rip: entry_point.as_u64(),
+            interrupt_cs: ((USER_CODE_SEGMENT_INDEX << 3) | 3) as u64,
+            interrupt_rflags: rflags::read_raw() | 0x200, // Enable interrupts
+            interrupt_rsp: stack_allocation.stack_start.as_u64(),
+            interrupt_ss: ((USER_DATA_SEGMENT_INDEX << 3) | 3) as u64,
+        },
+        state: TaskState::Ready,
+        cr3: user_cr3,
+    };
+    scheduler.task_list.push_back(task);
+    info!("created user task {:?} at {:#x}", name, entry_point);
+    trace!("created user task {:?}", task);
+    Ok(())
+}
+
+/// Get the current task's stack bounds and CR3
+///
+/// Returns (stack_bottom, stack_top, cr3, is_user_task)
+/// Returns None if no task is running or if it's a kernel task
+pub fn get_current_task_stack_info() -> Option<(VirtAddr, VirtAddr, PhysFrame)> {
+    let scheduler = TASK_SCHEDULER.lock();
+    let task = scheduler.task_list.front()?;
+
+    if let TaskType::User(user_info) = task.task_type {
+        Some((user_info.stack_end, user_info.stack_start, task.cr3))
+    } else {
+        None
+    }
+}
+
+/// Try to grow the user stack by mapping a new page
+///
+/// Returns true if the fault was successfully handled (stack grew),
+/// false if the fault is not a valid stack growth (e.g., stack overflow)
+///
+/// # Arguments
+/// * `fault_addr` - The virtual address that caused the page fault
+///
+/// # Safety
+/// This function must only be called from the page fault handler
+pub unsafe fn try_grow_user_stack(fault_addr: VirtAddr) -> Result<(), StackGrowthError> {
+    let Some((stack_bottom, stack_top, user_cr3)) = get_current_task_stack_info() else {
+        return Err(StackGrowthError::NotUserTask);
+    };
+
+    if fault_addr < stack_bottom {
+        debug!(
+            "Stack overflow detected: fault at {:#x}, stack_bottom {:#x}",
+            fault_addr, stack_bottom
+        );
+        return Err(StackGrowthError::StackOverflow);
+    }
+
+    if fault_addr >= stack_top {
+        return Err(StackGrowthError::StackUnderflow);
+    }
+
+    let page = Page::containing_address(fault_addr);
+
+    debug!(
+        "Growing user stack: mapping page at {:#x} (fault at {:#x})",
+        page.start_address(),
+        fault_addr
+    );
+
+    let mut user_page_table = unsafe { get_user_page_table_from_cr3(user_cr3) };
+
+    let frame = {
+        let mut frame_allocator = FRAME_ALLOCATOR.lock();
+        let frame_allocator = frame_allocator.as_mut().unwrap();
+        match frame_allocator.allocate_frame() {
+            Some(frame) => frame,
+            None => {
+                debug!("Failed to allocate frame for stack growth");
+                return Err(StackGrowthError::Other);
+            }
+        }
+    };
+
+    match unsafe {
+        user_page_table.map_to(
+            page,
+            frame,
+            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE,
+            FRAME_ALLOCATOR.lock().as_mut().unwrap(),
+        )
+    } {
+        Ok(flush) => {
+            flush.flush();
+            trace!("Successfully mapped stack page at {:#x}", page.start_address());
+
+            let mut scheduler = TASK_SCHEDULER.lock();
+            if let Some(task) = scheduler.task_list.front_mut()
+                && let TaskType::User(ref mut user_info) = task.task_type {
+                    user_info.stack_size += 1;
+                    trace!("Updated stack_size to {} pages", user_info.stack_size);
+                }
+
+            Ok(())
+        }
+        Err(e) => {
+            debug!("Failed to map stack page: {:?}", e);
+            unsafe {
+                use x86_64::structures::paging::FrameDeallocator;
+                FRAME_ALLOCATOR.lock().as_mut().unwrap().deallocate_frame(frame);
+            }
+            Err(StackGrowthError::Other)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StackGrowthError {
+    StackOverflow,
+    StackUnderflow,
+    NotUserTask,
+    Other,
 }
 
 /// Yields the current task to the scheduler, waiting for an interrupt
@@ -171,7 +423,6 @@ struct ProcessControlBlock {
     pub task_type: TaskType,
     pub regs: TaskRegisters,
     pub state: TaskState,
-    pub stack_start: NonNull<()>,
     /// page table for process
     pub cr3: PhysFrame,
 }
@@ -194,11 +445,21 @@ enum WaitReason {
     Interrupt(u8),
 }
 
+/// Information about a user task's stack
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UserInfo {
+    pub stack_start: VirtAddr,
+    pub stack_end: VirtAddr,
+    pub stack_size: u64,
+}
+
 /// Type of a task
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TaskType {
-    Kernel,
-    User, // TODO!
+    Kernel {
+        stack_start: Option<VirtAddr>,
+    },
+    User(UserInfo),
 }
 
 // Stores task registers in reverse order of stack push during context switch
@@ -253,7 +514,7 @@ pub unsafe extern "x86-interrupt" fn schedule() {
         "push r14",
         "push r15",
         "mov rdi, rsp",        // put current task's stack pointer
-        "call schedule_inner", // call scheduler with rsp
+        "call {schedule_inner}", // call scheduler with rsp
         // send EOI to lapic using MSR 0x80B
         "xor eax, eax",
         "xor edx, edx",
@@ -276,11 +537,11 @@ pub unsafe extern "x86-interrupt" fn schedule() {
         "pop rbx",
         "pop rax",
         "iretq",
+        schedule_inner = sym schedule_inner,
     );
 }
 
 /// inner function to switch tasks
-#[unsafe(no_mangle)]
 unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
     let mut scheduler = TASK_SCHEDULER.lock();
 
@@ -289,8 +550,36 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
 
     if current_task.state == TaskState::Terminated {
         trace!("task ended at {:#X}", current_task.regs.interrupt_rsp);
-        if current_task.stack_start != NonNull::dangling() {
-            STACK_ALLOCATOR.lock().return_stack(current_task.stack_start);
+        match current_task.task_type {
+            TaskType::Kernel { stack_start: Some(stack_start) } => {
+                STACK_ALLOCATOR.lock().return_stack(stack_start);
+            }
+            TaskType::User(user_info) => {
+                // Deallocate user stack
+                let mut user_page_table = unsafe { get_user_page_table_from_cr3(current_task.cr3) };
+                unsafe {
+                    crate::tasks::kernelslab::return_user_stack(
+                        &mut user_page_table,
+                        user_info,
+                    );
+                }
+                debug!("User task terminated and stack deallocated at {:#x}", user_info.stack_start);
+
+                // Deallocate all intermediate page table frames (L3, L2, L1)
+                // Level 4 is the L4 table (CR3), so we start at level 4 to process its children
+                unsafe {
+                    deallocate_user_page_table_recursive(current_task.cr3, 4);
+                }
+                debug!("User task intermediate page tables deallocated");
+
+                // Finally, deallocate the CR3 frame (L4 page table) itself
+                unsafe {
+                    use x86_64::structures::paging::FrameDeallocator;
+                    FRAME_ALLOCATOR.lock().as_mut().unwrap().deallocate_frame(current_task.cr3);
+                }
+                debug!("User task CR3 frame deallocated at {:#x}", current_task.cr3.start_address());
+            }
+            _ => {}
         }
     } else if let TaskState::Waiting(WaitReason::Interrupt(_interrupt)) = current_task.state {
         current_task.regs = unsafe { *current_task_context };
@@ -322,5 +611,14 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
     trace!("task for next: {:?}", next_task);
     trace!("next task at {:#X}", next_task.regs.interrupt_rsp);
     next_task.state = TaskState::Running;
+
+    let current_cr3 = Cr3::read().0;
+    if current_cr3 != next_task.cr3 {
+        trace!("Switching CR3 from {:#x} to {:#x}", current_cr3.start_address(), next_task.cr3.start_address());
+        unsafe {
+            Cr3::write(next_task.cr3, x86_64::registers::control::Cr3Flags::empty());
+        }
+    }
+
     unsafe { *current_task_context = next_task.regs };
 }
