@@ -15,11 +15,11 @@ use x86_64::{
 
 use crate::{
     debug,
-    gdt::{USER_CODE_SEGMENT_INDEX, USER_DATA_SEGMENT_INDEX},
+    gdt::{USER_CODE_SEGMENT_INDEX, USER_DATA_SEGMENT_INDEX, set_kernel_stack},
     info,
     interrupts::apic::LAPIC_TIMER_VECTOR,
     memory::FRAME_ALLOCATOR,
-    tasks::kernelslab::{INITIAL_STACK_PAGES, STACK_ALLOCATOR, get_user_stack},
+    tasks::kernelslab::{INITIAL_STACK_PAGES, STACK_ALLOCATOR, get_user_stack, return_user_stack},
     trace,
 };
 
@@ -214,12 +214,27 @@ pub fn ucreate_task(entry_point: VirtAddr, name: &str) -> Result<(), Box<dyn Err
         }
     };
 
+    let kernel_stack = STACK_ALLOCATOR.lock().get_stack().map_err(|e| -> Box<dyn Error> {
+        unsafe {
+            let mut user_page_table = get_user_page_table_from_cr3(user_cr3);
+            crate::tasks::kernelslab::return_user_stack(&mut user_page_table, UserInfo {
+                stack_start: stack_allocation.stack_start,
+                stack_end: stack_allocation.stack_end,
+                stack_size: INITIAL_STACK_PAGES,
+                kernel_stack: VirtAddr::zero(),
+            });
+            FRAME_ALLOCATOR.lock().as_mut().unwrap().deallocate_frame(user_cr3);
+        }
+        e.into()
+    })?;
+
     let mut scheduler = TASK_SCHEDULER.lock();
     let task = ProcessControlBlock {
         task_type: TaskType::User(UserInfo {
             stack_start: stack_allocation.stack_start,
             stack_end: stack_allocation.stack_end,
             stack_size: INITIAL_STACK_PAGES,
+            kernel_stack,
         }),
         regs: TaskRegisters {
             rax: 0,
@@ -451,6 +466,7 @@ pub struct UserInfo {
     pub stack_start: VirtAddr,
     pub stack_end: VirtAddr,
     pub stack_size: u64,
+    pub kernel_stack: VirtAddr,
 }
 
 /// Type of a task
@@ -555,24 +571,23 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
                 STACK_ALLOCATOR.lock().return_stack(stack_start);
             }
             TaskType::User(user_info) => {
-                // Deallocate user stack
                 let mut user_page_table = unsafe { get_user_page_table_from_cr3(current_task.cr3) };
                 unsafe {
-                    crate::tasks::kernelslab::return_user_stack(
+                    return_user_stack(
                         &mut user_page_table,
                         user_info,
                     );
                 }
+
+                STACK_ALLOCATOR.lock().return_stack(user_info.kernel_stack);
+
                 debug!("User task terminated and stack deallocated at {:#x}", user_info.stack_start);
 
-                // Deallocate all intermediate page table frames (L3, L2, L1)
-                // Level 4 is the L4 table (CR3), so we start at level 4 to process its children
                 unsafe {
                     deallocate_user_page_table_recursive(current_task.cr3, 4);
                 }
                 debug!("User task intermediate page tables deallocated");
 
-                // Finally, deallocate the CR3 frame (L4 page table) itself
                 unsafe {
                     use x86_64::structures::paging::FrameDeallocator;
                     FRAME_ALLOCATOR.lock().as_mut().unwrap().deallocate_frame(current_task.cr3);
@@ -611,6 +626,12 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
     trace!("task for next: {:?}", next_task);
     trace!("next task at {:#X}", next_task.regs.interrupt_rsp);
     next_task.state = TaskState::Running;
+
+    if let TaskType::User(user_info) = next_task.task_type {
+        unsafe {
+            set_kernel_stack(user_info.kernel_stack);
+        }
+    }
 
     let current_cr3 = Cr3::read().0;
     if current_cr3 != next_task.cr3 {

@@ -37,7 +37,6 @@ static GDT: Lazy<(GlobalDescriptorTable, Selectors)> = Lazy::new(|| {
 });
 
 /// merged struct for storing selectors to user code, kernel code, and the TSS.
-#[allow(dead_code)] // remove in future
 struct Selectors {
     kernel_code_selector: SegmentSelector,
     kernel_data_selector: SegmentSelector,
@@ -79,3 +78,15 @@ static TSS: Lazy<TaskStateSegment> = Lazy::new(|| {
     info!("tss initialized");
     tss
 });
+
+/// Update the TSS RSP0 field with the kernel stack for the current task
+/// This is used by the CPU when transitioning from user mode to kernel mode via interrupts
+///
+/// # Safety
+/// Must be called with a valid kernel stack pointer
+pub unsafe fn set_kernel_stack(stack_top: VirtAddr) {
+    let tss_ptr = &raw const *TSS as *mut TaskStateSegment;
+    unsafe {
+        (*tss_ptr).privilege_stack_table[0] = stack_top;
+    }
+}

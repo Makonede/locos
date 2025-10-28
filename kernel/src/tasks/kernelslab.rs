@@ -209,10 +209,8 @@ pub fn get_user_stack(
 /// - No other references to the stack pages exist
 pub unsafe fn return_user_stack(
     user_page_table: &mut x86_64::structures::paging::OffsetPageTable,
-    UserInfo { stack_start, stack_end, stack_size }: UserInfo,
+    UserInfo { stack_start, stack_end, stack_size, kernel_stack: _kernel_stack }: UserInfo,
 ) {
-    use x86_64::structures::paging::Mapper;
-
     let actual_stack_bottom = stack_start.as_u64() - (stack_size * 0x1000);
 
     trace!(

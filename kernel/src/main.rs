@@ -31,6 +31,7 @@ pub mod pci;
 pub mod ps2;
 pub mod serial;
 pub mod shell;
+pub mod syscall;
 pub mod tasks;
 pub mod testing;
 
@@ -149,6 +150,8 @@ unsafe extern "C" fn kernel_main() -> ! {
         .address();
 
     unsafe { setup_apic(rsdp_addr) };
+
+    syscall::init_syscall();
 
     ps2::init().expect("failed to initialize PS/2 subsystem");
 
