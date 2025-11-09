@@ -15,7 +15,8 @@ use x86_64::registers::control::EferFlags;
 use x86_64::registers::rflags::RFlags;
 use x86_64::registers::model_specific::{LStar, Star, SFMask, Efer};
 use x86_64::structures::gdt::SegmentSelector;
-use crate::{debug, info};
+use crate::tasks::scheduler::exit_task;
+use crate::{debug, info, trace};
 use crate::gdt::{KERNEL_CODE_SEGMENT_INDEX, KERNEL_DATA_SEGMENT_INDEX, USER_CODE_SEGMENT_INDEX, USER_DATA_SEGMENT_INDEX};
 
 /// Initialize syscall support
@@ -108,6 +109,7 @@ static mut KERNEL_SYSCALL_STACK: u64 = 0;
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct SyscallRegs {
+    // callee saved
     pub r15: u64,
     pub r14: u64,
     pub r13: u64,
@@ -115,16 +117,22 @@ pub struct SyscallRegs {
     pub rbp: u64,
     pub rbx: u64,
 
-    /// beginning of syscall arguments
+    // beginning of syscall arguments
+    /// argument 6
     pub r9: u64,
+    /// argument 5
     pub r8: u64,
+    /// argument 4
     pub r10: u64,
+    /// argument 3
     pub rdx: u64,
+    /// argument 2
     pub rsi: u64,
+    /// argument 1
     pub rdi: u64,
 
-    /// original rax
-    pub orig_rax: u64,
+    /// syscall number (original value in rax)
+    pub rax: u64,
     pub rip: u64,
     pub rflags: u64,
     pub rsp: u64,
@@ -157,10 +165,10 @@ impl SyscallNumber {
 pub unsafe extern "C" fn handle_syscall(regs: *mut SyscallRegs) -> u64 {
     let regs = unsafe { &*regs };
     
-    let syscall = match SyscallNumber::from_u64(regs.orig_rax) {
+    let syscall = match SyscallNumber::from_u64(regs.rax) {
         Some(s) => s,
         None => {
-            debug!("Unknown syscall number: {}", regs.orig_rax);
+            debug!("Unknown syscall number: {}", regs.rax);
             return u64::MAX; // Error
         }
     };
@@ -168,8 +176,66 @@ pub unsafe extern "C" fn handle_syscall(regs: *mut SyscallRegs) -> u64 {
     debug!("Syscall: {:?}(rdi={:#x}, rsi={:#x}, rdx={:#x})", syscall, regs.rdi, regs.rsi, regs.rdx);
 
     match syscall {
-        SyscallNumber::Exit => unimplemented!(), 
-        SyscallNumber::Write => unimplemented!(),
-        SyscallNumber::Read => unimplemented!(),
+        SyscallNumber::Exit => sys_exit(regs.rdi as i32),
+        SyscallNumber::Write => sys_write(regs.rdi as i32, regs.rsi as usize as *const u8, regs.rdx as usize),
+        SyscallNumber::Read => unimplemented!("need to read from keyboard"),
     }
+}
+
+/// sys_exit - terminate the calling task
+///
+/// # Arguments
+/// * `exit_code` - Exit status code
+///
+/// # Returns
+/// Never returns (task is terminated)
+fn sys_exit(_exit_code: i32) -> u64 {
+    trace!("Task exiting with code {}", _exit_code);
+    
+    exit_task();
+}
+
+/// sys_write - write to a file descriptor
+///
+/// # Arguments
+/// * `fd` - File descriptor (0=stdin, 1=stdout, 2=stderr)
+/// * `buf` - Pointer to buffer in user space
+/// * `count` - Number of bytes to write
+///
+/// # Returns
+/// Number of bytes written, or -1 on error
+fn sys_write(fd: i32, buf: *const u8, count: usize) -> u64 {
+    use crate::{print, serial_print};
+    
+    if fd != 1 && fd != 2 {
+        debug!("sys_write: unsupported fd {}", fd);
+        return u64::MAX;
+    }
+    
+    let buf_addr = buf as usize;
+    if buf_addr >= 0x0000_8000_0000_0000 || buf_addr.saturating_add(count) >= 0x0000_8000_0000_0000 {
+        debug!("sys_write: invalid buffer address {:#x}", buf_addr);
+        return u64::MAX;
+    }
+    
+    if count == 0 {
+        return 0;
+    }
+    
+    let slice = unsafe { core::slice::from_raw_parts(buf, count) };
+    
+    let output = match core::str::from_utf8(slice) {
+        Ok(s) => s,
+        Err(_) => {
+            debug!("sys_write: invalid UTF-8 in buffer");
+            return u64::MAX; // Error
+        }
+    };
+    
+    serial_print!("{}", output);
+    if fd == 1 {
+        print!("{}", output);
+    }
+    
+    count as u64
 }

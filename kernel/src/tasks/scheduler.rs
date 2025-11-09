@@ -399,11 +399,11 @@ pub fn wake_tasks(interrupt: u8) {
         .for_each(|x| x.state = TaskState::Ready);
 }
 
-/// Exits a task
+/// Terminates the current task, handing control to the scheduler
 ///
-/// should be called at the end of every running kernel task when it wants to terminate
+/// should be called at the end of every running task when it wants to terminate
 #[inline]
-pub fn kexit_task() -> ! {
+pub fn exit_task() -> ! {
     interrupts::disable();
     {
         let mut scheduler = TASK_SCHEDULER.lock();

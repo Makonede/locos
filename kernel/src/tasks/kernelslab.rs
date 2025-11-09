@@ -180,6 +180,7 @@ pub fn get_user_stack(
     }
 
     // stack_end is already calculated correctly based on INITIAL_STACK_PAGES
+    // 
     // The maximum stack can grow to is USER_STACKS_START - (USTACK_SIZE * 0x1000)
     let max_stack_end = USER_STACKS_START - (USTACK_SIZE * 0x1000);
 

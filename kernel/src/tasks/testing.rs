@@ -1,6 +1,6 @@
 use crate::{
     println,
-    tasks::scheduler::kexit_task,
+    tasks::scheduler::exit_task,
 };
 
 #[test_case]
@@ -16,7 +16,7 @@ fn do_something() -> ! {
         println!("iteration {}", i);
     }
 
-    kexit_task();
+    exit_task();
 }
 
 fn do_something_else() -> ! {
@@ -24,5 +24,5 @@ fn do_something_else() -> ! {
         println!("iteration from 2nd thread {}", i);
     }
 
-    kexit_task();
+    exit_task();
 }
