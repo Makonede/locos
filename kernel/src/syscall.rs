@@ -31,7 +31,7 @@ pub fn init_syscall() {
         let user_cs_32 = SegmentSelector::new(USER_DATA_SEGMENT_INDEX, x86_64::PrivilegeLevel::Ring3);
         let user_cs = SegmentSelector::new(USER_CODE_SEGMENT_INDEX, x86_64::PrivilegeLevel::Ring3);
 
-        Star::write(user_cs_32, user_cs, kernel_cs, kernel_ss).unwrap();
+        Star::write(user_cs_32, user_cs, kernel_cs, kernel_ss).unwrap(); // compressed
         LStar::write(VirtAddr::from_ptr(syscall_handler as *const ()));
         SFMask::write(RFlags::INTERRUPT_FLAG);
     }
@@ -51,16 +51,16 @@ unsafe extern "C" fn syscall_handler() {
         "mov rsp, [rip + {KERNEL_SYSCALL_STACK}]",
 
         "push qword ptr [rip + {USER_RSP}]",  // user rsp
-        "push r11",
-        "push rcx",
-        "push rax",
-        "push rdi",
-        "push rsi",
-        "push rdx",
-        "push r10",
-        "push r8",
-        "push r9",
-        "push rbx",
+        "push r11", // rflags
+        "push rcx", // return rip
+        "push rax", // syscall number
+        "push rdi", // arg1
+        "push rsi", // arg2
+        "push rdx", // arg3
+        "push r10", // arg4
+        "push r8",  // arg5
+        "push r9",  // arg6
+        "push rbx", // callee saved
         "push rbp",
         "push r12",
         "push r13",
@@ -102,10 +102,21 @@ static mut USER_RSP: u64 = 0;
 /// TODO: replace with something better asap
 static mut KERNEL_SYSCALL_STACK: u64 = 0;
 
+/// Set the kernel stack for syscall handling
+/// Must be called when switching to a user task
+///
+/// # Safety
+/// This function is not SMP-safe as it modifies a global variable.
+/// It should only be called from the task scheduler with interrupts disabled.
+pub unsafe fn set_syscall_stack(stack_bottom: VirtAddr) {
+    unsafe {
+        KERNEL_SYSCALL_STACK = stack_bottom.as_u64();
+    }
+}
+
 /// Syscall register state (Linux pt_regs style)
 ///
 /// This structure matches the exact stack layout created by syscall_handler.
-/// Registers are pushed in reverse order so the struct layout matches stack order.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct SyscallRegs {

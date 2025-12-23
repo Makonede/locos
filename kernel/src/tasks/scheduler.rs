@@ -14,13 +14,7 @@ use x86_64::{
 };
 
 use crate::{
-    debug,
-    gdt::{USER_CODE_SEGMENT_INDEX, USER_DATA_SEGMENT_INDEX, set_kernel_stack},
-    info,
-    interrupts::apic::LAPIC_TIMER_VECTOR,
-    memory::FRAME_ALLOCATOR,
-    tasks::kernelslab::{INITIAL_STACK_PAGES, STACK_ALLOCATOR, get_user_stack, return_user_stack},
-    trace,
+    debug, gdt::{USER_CODE_SEGMENT_INDEX, USER_DATA_SEGMENT_INDEX, set_kernel_stack}, info, interrupts::apic::LAPIC_TIMER_VECTOR, memory::FRAME_ALLOCATOR, syscall::set_syscall_stack, tasks::kernelslab::{INITIAL_STACK_PAGES, STACK_ALLOCATOR, get_user_stack, return_user_stack}, trace
 };
 
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
@@ -217,7 +211,7 @@ pub fn ucreate_task(entry_point: VirtAddr, name: &str) -> Result<(), Box<dyn Err
     let kernel_stack = STACK_ALLOCATOR.lock().get_stack().map_err(|e| -> Box<dyn Error> {
         unsafe {
             let mut user_page_table = get_user_page_table_from_cr3(user_cr3);
-            crate::tasks::kernelslab::return_user_stack(&mut user_page_table, UserInfo {
+            return_user_stack(&mut user_page_table, UserInfo {
                 stack_start: stack_allocation.stack_start,
                 stack_end: stack_allocation.stack_end,
                 stack_size: INITIAL_STACK_PAGES,
@@ -630,6 +624,7 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
     if let TaskType::User(user_info) = next_task.task_type {
         unsafe {
             set_kernel_stack(user_info.kernel_stack);
+            set_syscall_stack(user_info.kernel_stack);
         }
     }
 

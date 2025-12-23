@@ -61,7 +61,7 @@ impl KernelSlabAlloc {
 
     /// allocate a stack and guard page
     ///
-    /// returns the address to the stack top (highest usable address)
+    /// returns the address to the stack bottom (highest usable address)
     pub fn get_stack(&mut self) -> Result<VirtAddr, StackAllocError> {
         let block_index = self.block_bitmap.trailing_ones();
 
