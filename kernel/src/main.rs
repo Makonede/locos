@@ -167,9 +167,30 @@ unsafe extern "C" fn kernel_main() -> ! {
     #[cfg(not(test))]
     {
         use crate::shell::task::locos_shell;
+        use crate::tasks::scheduler::ucreate_task;
+
+        const TEST_PROGRAM: &[u8] = &[
+            0x48, 0xc7, 0xc0, 0x01, 0x00, 0x00, 0x00,  // mov rax, 1 (sys_write)
+            0x48, 0xc7, 0xc7, 0x01, 0x00, 0x00, 0x00,  // mov rdi, 1 (stdout)
+            0x48, 0x8d, 0x35, 0x19, 0x00, 0x00, 0x00,  // lea rsi, [rip+25] (message)
+            0x48, 0xc7, 0xc2, 0x16, 0x00, 0x00, 0x00,  // mov rdx, 22 (length)
+            0x0f, 0x05,                                // syscall
+            0x48, 0xc7, 0xc0, 0x00, 0x00, 0x00, 0x00,  // mov rax, 0 (sys_exit)
+            0x48, 0xc7, 0xc7, 0x00, 0x00, 0x00, 0x00,  // mov rdi, 0 (exit code)
+            0x0f, 0x05,                                // syscall
+            // "Hello from userspace!\n"
+            0x48, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x66, 0x72,
+            0x6f, 0x6d, 0x20, 0x75, 0x73, 0x65, 0x72, 0x73,
+            0x70, 0x61, 0x63, 0x65, 0x21, 0x0a,
+        ];
 
         kcreate_task(tprint_welcome, "print welcome message");
         kcreate_task(locos_shell, "locos shell");
+        
+        if let Err(e) = ucreate_task(VirtAddr::new(0x400000), Some(TEST_PROGRAM), "test_userspace") {
+            error!("Failed to create test userspace task: {}", e);
+        }
+        
         kinit_multitasking();
 
         x86_64::instructions::interrupts::enable();

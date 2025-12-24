@@ -1,6 +1,6 @@
 use core::{arch::naked_asm, error::Error};
 
-use alloc::{boxed::Box, collections::vec_deque::VecDeque};
+use alloc::{boxed::Box, collections::vec_deque::VecDeque, format};
 use spin::Mutex;
 use x86_64::{
     VirtAddr,
@@ -184,8 +184,9 @@ fn create_user_page_table() -> PhysFrame {
 ///
 /// # Arguments
 /// * `entry_point` - Virtual address where the user code starts
+/// * `code` - Optional program code to load at entry_point address
 /// * `name` - Name of the task for debugging
-pub fn ucreate_task(entry_point: VirtAddr, name: &str) -> Result<(), Box<dyn Error>> {
+pub fn ucreate_task(entry_point: VirtAddr, code: Option<&[u8]>, name: &str) -> Result<(), Box<dyn Error>> {
     if entry_point.as_u64() >= 0x0000_8000_0000_0000 {
         return Err("Entry point must be in user address space (< 0x0000_8000_0000_0000)".into());
     }
@@ -196,6 +197,43 @@ pub fn ucreate_task(entry_point: VirtAddr, name: &str) -> Result<(), Box<dyn Err
     let user_l4_virt = VirtAddr::new(user_cr3.start_address().as_u64() + hhdm_offset);
     let user_l4_table: &mut PageTable = unsafe { &mut *user_l4_virt.as_mut_ptr() };
     let mut user_page_table = unsafe { OffsetPageTable::new(user_l4_table, VirtAddr::new(hhdm_offset)) };
+
+    if let Some(code_data) = code { // deallocated on task exit
+        let code_start_page = Page::containing_address(entry_point);
+        let code_end_page = Page::containing_address(entry_point + (code_data.len() as u64 - 1));
+        
+        let mut code_offset = 0;
+        for page in Page::range_inclusive(code_start_page, code_end_page) {
+            let frame = {
+                let mut frame_allocator = FRAME_ALLOCATOR.lock();
+                frame_allocator.as_mut().unwrap()
+                    .allocate_frame()
+                    .ok_or("Failed to allocate frame for code")?
+            };
+            
+            unsafe {
+                user_page_table.map_to(
+                    page,
+                    frame,
+                    PageTableFlags::PRESENT | PageTableFlags::USER_ACCESSIBLE | PageTableFlags::WRITABLE,
+                    FRAME_ALLOCATOR.lock().as_mut().unwrap(),
+                ).map_err(|e| format!("Failed to map code page: {e:?}"))?
+                .flush();
+            }
+            
+            let frame_virt = VirtAddr::new(frame.start_address().as_u64() + hhdm_offset);
+            let bytes_to_copy = core::cmp::min(4096, code_data.len() - code_offset);
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    code_data[code_offset..].as_ptr(),
+                    frame_virt.as_mut_ptr::<u8>(),
+                    bytes_to_copy,
+                );
+            }
+            code_offset += bytes_to_copy;
+        }
+        debug!("Mapped {} bytes of code at {:#x}", code_data.len(), entry_point);
+    }
 
     let stack_allocation = match get_user_stack(&mut user_page_table) {
         Ok(alloc) => alloc,
@@ -565,14 +603,6 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
                 STACK_ALLOCATOR.lock().return_stack(stack_start);
             }
             TaskType::User(user_info) => {
-                let mut user_page_table = unsafe { get_user_page_table_from_cr3(current_task.cr3) };
-                unsafe {
-                    return_user_stack(
-                        &mut user_page_table,
-                        user_info,
-                    );
-                }
-
                 STACK_ALLOCATOR.lock().return_stack(user_info.kernel_stack);
 
                 debug!("User task terminated and stack deallocated at {:#x}", user_info.stack_start);
