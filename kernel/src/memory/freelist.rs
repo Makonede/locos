@@ -145,6 +145,11 @@ impl DoubleFreeList {
                     next_node.as_mut().links.prev = None;
                 }
             }
+            unsafe {
+                node.as_mut().links.next = None;
+                node.as_mut().links.prev = None;
+                node.as_mut().level_size = None;
+            }
             self.len -= 1;
             Some(node)
         } else {

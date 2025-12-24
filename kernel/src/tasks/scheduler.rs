@@ -605,12 +605,12 @@ unsafe extern "C" fn schedule_inner(current_task_context: *mut TaskRegisters) {
             TaskType::User(user_info) => {
                 STACK_ALLOCATOR.lock().return_stack(user_info.kernel_stack);
 
-                debug!("User task terminated and stack deallocated at {:#x}", user_info.stack_start);
+                debug!("User task terminated, deallocating all user memory");
 
                 unsafe {
                     deallocate_user_page_table_recursive(current_task.cr3, 4);
                 }
-                debug!("User task intermediate page tables deallocated");
+                debug!("User task page tables and all mapped frames deallocated");
 
                 unsafe {
                     use x86_64::structures::paging::FrameDeallocator;
