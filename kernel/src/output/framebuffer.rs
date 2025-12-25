@@ -15,14 +15,22 @@ You should have received a copy of the GNU General Public License along with loc
 <https://www.gnu.org/licenses/>.
 */
 
+//! Framebuffer information and utilities.
+//!
+//! Provides structures for managing framebuffer configuration.
+
 use limine::framebuffer::{Framebuffer, MemoryModel};
 
+/// Framebuffer configuration information
 #[derive(Clone, Copy)]
 pub struct FramebufferInfo {
+    /// Width in pixels
     pub width: usize,
+    /// Height in pixels
     pub height: usize,
+    /// Pitch (bytes per line)
     pub pitch: usize,
-    /// **bytes** per pixel
+    /// Bytes per pixel
     pub bpp: usize,
     pub red_mask_size: u8,
     pub green_mask_size: u8,
@@ -30,9 +38,11 @@ pub struct FramebufferInfo {
     pub red_mask_shift: u8,
     pub green_mask_shift: u8,
     pub blue_mask_shift: u8,
+    /// Memory model used by the framebuffer
     pub memory_model: MemoryModel,
 }
 
+/// Extract framebuffer information from a Limine framebuffer
 pub fn get_info_from_frambuffer(framebuffer: &Framebuffer) -> FramebufferInfo {
     let pitch = framebuffer.pitch() as usize;
     let bpp = framebuffer.bpp() as usize;

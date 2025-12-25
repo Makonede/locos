@@ -1,3 +1,7 @@
+//! Page table management and frame allocation.
+//!
+//! Provides frame allocator using buddy allocation and page table initialization.
+
 use core::mem::{align_of, size_of};
 use core::ptr::NonNull;
 
@@ -15,15 +19,16 @@ use x86_64::{
     },
 };
 
+/// Global frame allocator instance
 pub static FRAME_ALLOCATOR: Mutex<Option<FrameBuddyAllocatorForest>> = Mutex::new(None);
+/// Global page table instance
 pub static PAGE_TABLE: Mutex<Option<OffsetPageTable>> = Mutex::new(None);
 
-/// statically fills the page list with entries
+/// Fill the page list with entries from usable memory regions
 ///
-/// looks for the first place that can fill the page list.
+/// Looks for the first place that can fill the page list.
 ///
 /// # Safety
-///
 /// The caller must ensure that:
 /// - The `entries` contain valid memory regions that are safe to write to
 /// - The `hhdm_offset` correctly represents the higher half direct mapping offset
@@ -73,11 +78,12 @@ pub unsafe fn fill_page_list(entries: &[&Entry], hhdm_offset: usize) {
     }
 }
 
-/// A frame buddy allocator that manages multiple free lists for frames
-/// N is the max number of levels, only adjustable at compile time
+/// Frame buddy allocator that manages multiple free lists
 ///
-/// all methods work with virtual memory. It is assumed that there is an hddm offset present
-/// and that the wrapper type handles the conversion.
+/// All methods work with virtual memory assuming an HHDM offset is present.
+///
+/// # Type Parameters
+/// * `L`: Maximum number of levels (default 26)
 pub struct FrameBuddyAllocator<const L: usize = 26> {
     free_lists: [DoubleFreeList; L],
     levels: usize,
@@ -89,7 +95,7 @@ pub struct FrameBuddyAllocator<const L: usize = 26> {
 unsafe impl<const L: usize> Send for FrameBuddyAllocator<L> {}
 
 impl<const L: usize> FrameBuddyAllocator<L> {
-    /// Creates a new FrameBuddyAllocator with the specified levels, start, and end addresses.
+    /// Create a new frame buddy allocator
     ///
     /// # Safety
     /// Must be aligned to 4096 bytes (page size).

@@ -1,3 +1,7 @@
+//! Task scheduler for preemptive multitasking.
+//!
+//! Provides round-robin scheduling for both kernel and user tasks.
+
 use core::{arch::naked_asm, error::Error};
 
 use alloc::{boxed::Box, collections::vec_deque::VecDeque, format};
@@ -17,14 +21,15 @@ use crate::{
     debug, gdt::{USER_CODE_SEGMENT_INDEX, USER_DATA_SEGMENT_INDEX, set_kernel_stack}, info, interrupts::apic::LAPIC_TIMER_VECTOR, memory::FRAME_ALLOCATOR, syscall::set_syscall_stack, tasks::kernelslab::{INITIAL_STACK_PAGES, STACK_ALLOCATOR, get_user_stack, return_user_stack}, trace
 };
 
+/// Global task scheduler instance
 static TASK_SCHEDULER: Mutex<TaskScheduler> = Mutex::new(TaskScheduler::new());
 
-/// stack size of kernel task in pages. Must be power of 2
+/// Stack size for kernel tasks in pages (must be power of 2)
 pub const KSTACK_SIZE: u8 = 4;
 
-/// adds the current kernel task to a pcb
+/// Initialize multitasking by adding the current kernel task to the scheduler
 ///
-/// this task should never finish
+/// This task should never finish.
 pub fn kinit_multitasking() {
     let current_regs = TaskRegisters {
         rax: 0,
@@ -64,10 +69,13 @@ pub fn kinit_multitasking() {
     );
 }
 
-/// adds a new kernel task to the scheduler
-/// Each kernel task has a stack size of KSTACK_SIZE - 1, for a guard page
+/// Create a new kernel task and add it to the scheduler
 ///
-/// task should be a pointer to the function to run
+/// Each kernel task has a stack size of KSTACK_SIZE - 1 pages (with 1 guard page).
+///
+/// # Arguments
+/// * `task_ptr` - Function pointer to run as the task
+/// * `name` - Name of the task for debugging
 pub fn kcreate_task(task_ptr: fn() -> !, name: &str) {
     let mut stack_allocator = STACK_ALLOCATOR.lock();
     let stack_start = stack_allocator.get_stack().expect("Failed to allocate kernel stack");
@@ -108,10 +116,10 @@ pub fn kcreate_task(task_ptr: fn() -> !, name: &str) {
     trace!("created task {:?}", task);
 }
 
-/// Reconstructs an OffsetPageTable from a CR3 value
+/// Reconstruct an OffsetPageTable from a CR3 value
 ///
 /// # Safety
-/// The caller must ensure that the CR3 points to a valid page table
+/// The caller must ensure that the CR3 points to a valid page table.
 unsafe fn get_user_page_table_from_cr3(cr3: PhysFrame) -> OffsetPageTable<'static> {
     let hhdm_offset = FRAME_ALLOCATOR.lock().as_ref().unwrap().hddm_offset;
     let l4_virt = VirtAddr::new(cr3.start_address().as_u64() + hhdm_offset);
@@ -119,12 +127,13 @@ unsafe fn get_user_page_table_from_cr3(cr3: PhysFrame) -> OffsetPageTable<'stati
     unsafe { OffsetPageTable::new(l4_table, VirtAddr::new(hhdm_offset)) }
 }
 
-/// Recursively deallocates all page table frames in the user space portion (entries 0-255)
-/// of a page table hierarchy
+/// Recursively deallocate all page table frames in the user space portion
+///
+/// Processes entries 0-255 of a page table hierarchy.
 ///
 /// # Safety
-/// - The caller must ensure that the page table is valid and not in use
-/// - This should only be called on user page tables, not the kernel page table
+/// - The page table must be valid and not in use
+/// - Should only be called on user page tables, not the kernel page table
 /// - The page table must not be the currently active page table
 unsafe fn deallocate_user_page_table_recursive(table_frame: PhysFrame, level: u8) {
     let hhdm_offset = FRAME_ALLOCATOR.lock().as_ref().unwrap().hddm_offset;

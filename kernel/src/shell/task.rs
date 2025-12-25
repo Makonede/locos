@@ -1,7 +1,9 @@
+//! Shell task for keyboard input handling.
+
 use crate::{print, ps2::keyboard::{KeyEvent, KEYBOARD}};
 use x86_64::instructions::interrupts;
 
-/// consumes input from the keyboard buffer
+/// Consume input from the keyboard buffer and display it
 pub fn locos_shell() -> ! {
     loop {
         let (event, state) = interrupts::without_interrupts(|| {

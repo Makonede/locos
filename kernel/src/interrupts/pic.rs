@@ -1,3 +1,7 @@
+//! Legacy PIC (Programmable Interrupt Controller) support.
+//!
+//! Provides functions to disable the legacy 8259 PIC.
+
 use x86_64::instructions::port::Port;
 
 const PIC1_COMMAND: u16 = 0x20;
@@ -10,11 +14,13 @@ const PIC2_OFFSET: u8 = 0x28;
 
 const ALL_INTERRUPTS_MASK: u8 = 0xFF;
 
+/// Disable the legacy 8259 PICs
 pub fn disable_legacy_pics() {
     init_and_remap_pics();
     mask_all_irqs();
 }
 
+/// Initialize and remap the PICs
 fn init_and_remap_pics() {
     unsafe {
         let mut master_port = Port::new(PIC1_COMMAND);
@@ -33,6 +39,7 @@ fn init_and_remap_pics() {
     }
 }
 
+/// Mask all IRQs on both PICs
 fn mask_all_irqs() {
     unsafe {
         let mut master_port = Port::new(PIC1_DATA);

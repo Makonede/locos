@@ -1,3 +1,7 @@
+//! Metadata and branding for locOS.
+//!
+//! Contains welcome messages and version information.
+
 use crate::{print, println, serial_println, tasks::scheduler::exit_task};
 
 const WELCOME: &str = r"___       ________  ________  ________  ________      

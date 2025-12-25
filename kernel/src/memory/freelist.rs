@@ -1,8 +1,15 @@
+//! Free list data structures for memory allocators.
+//!
+//! Provides linked list structures for tracking free memory blocks.
+
 use core::ptr::NonNull;
 
+/// Simple singly-linked free list
 #[derive(Clone, Copy, Debug)]
 pub struct FreeList {
+    /// Head of the free list
     pub head: Option<NonNull<Node>>,
+    /// Number of elements in the list
     pub len: usize,
 }
 
@@ -15,12 +22,12 @@ impl Default for FreeList {
 }
 
 impl FreeList {
-    /// Creates a new empty free list.
+    /// Create a new empty free list
     pub const fn new() -> Self {
         FreeList { head: None, len: 0 }
     }
 
-    /// Pushes a frame onto the free list.
+    /// Push a block onto the free list
     pub const fn push(&mut self, ptr: NonNull<()>) {
         let node = ptr.cast::<Node>();
         unsafe {
@@ -30,7 +37,7 @@ impl FreeList {
         self.len += 1;
     }
 
-    /// Pops a frame from the free list.
+    /// Pop a block from the free list
     pub const fn pop(&mut self) -> Option<NonNull<()>> {
         if let Some(node) = self.head {
             self.head = unsafe { node.as_ref().next };
@@ -41,7 +48,7 @@ impl FreeList {
         }
     }
 
-    // check if an element exists
+    /// Check if an element exists in the list
     pub fn exists(&self, ptr: NonNull<()>) -> bool {
         let mut current = self.head;
         while let Some(node) = current {
@@ -54,9 +61,7 @@ impl FreeList {
         false
     }
 
-    /// Removes a block from the free list
-    ///
-    /// This method takes O(n) time
+    /// Remove a block from the free list (O(n) time)
     pub fn remove(&mut self, ptr: NonNull<()>) {
         let mut current = self.head;
         let mut prev: Option<NonNull<Node>> = None;
@@ -88,7 +93,7 @@ impl FreeList {
     }
 }
 
-/// A node in the linked list of free frames.
+/// Node in the free list
 #[derive(Clone, Copy, Debug)]
 pub struct Node {
     pub next: Option<NonNull<Node>>,
@@ -96,6 +101,7 @@ pub struct Node {
 
 unsafe impl Send for Node {}
 
+/// Doubly-linked free list
 #[derive(Clone, Copy, Debug)]
 pub struct DoubleFreeList {
     pub links: DoubleFreeListLink,

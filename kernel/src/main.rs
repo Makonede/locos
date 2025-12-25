@@ -66,8 +66,12 @@ use crate::{
 #[cfg(not(test))]
 use meta::tprint_welcome;
 
+/// Stack size for kernel in bytes (1 MiB)
 pub const STACK_SIZE: u64 = 0x100000;
 
+/// Kernel entry point
+///
+/// Initializes all kernel subsystems and starts multitasking.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn kernel_main() -> ! {
     assert!(BASE_REVISION.is_supported());
@@ -254,6 +258,7 @@ fn panic(info: &PanicInfo) -> ! {
     hcf();
 }
 
+/// Halt and catch fire - infinite loop with HLT instruction
 fn hcf() -> ! {
     loop {
         unsafe {

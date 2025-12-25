@@ -4,11 +4,12 @@ use x86_64::{registers::control::Cr2, structures::idt::{InterruptDescriptorTable
 
 use crate::{println, serial_println};
 
-/// Interrupt Descriptor Table with handlers for inturrupts.
+/// Interrupt Descriptor Table with handlers for interrupts.
 /// Current supported interrupts:
 /// - Breakpoint
 /// - Page Fault
 /// - Double Fault
+/// - General Protection Fault
 pub static mut IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     let mut idt = InterruptDescriptorTable::new();
     idt.breakpoint.set_handler_fn(breakpoint_handler);
@@ -30,11 +31,15 @@ pub fn init_idt() {
     info!("idt loaded");
 }
 
+/// Breakpoint exception handler
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     serial_println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
     println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
+/// Page fault exception handler
+///
+/// Attempts to grow the user stack if the fault occurred in user mode
 extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
@@ -52,6 +57,7 @@ extern "x86-interrupt" fn page_fault_handler(
     );
 }
 
+/// General protection fault handler
 extern "x86-interrupt" fn general_proction_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: u64,
@@ -62,6 +68,7 @@ extern "x86-interrupt" fn general_proction_fault_handler(
     )
 }
 
+/// Double fault exception handler
 extern "x86-interrupt" fn double_fault_handler(
     stack_frame: InterruptStackFrame,
     _error_code: u64,

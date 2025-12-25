@@ -1,6 +1,6 @@
 /// Syscall interface for user programs
 ///
-/// Syscalls use the `syscall` instruction on x86_64
+/// Syscalls use the `syscall` instruction on x86_64.
 /// Calling convention:
 /// - rax: syscall number
 /// - rdi: arg1
@@ -9,7 +9,7 @@
 /// - r10: arg4
 /// - r8: arg5
 /// - r9: arg6
-///   Return value in rax
+/// Return value in rax.
 use x86_64::VirtAddr;
 use x86_64::registers::control::EferFlags;
 use x86_64::registers::rflags::RFlags;
@@ -20,7 +20,8 @@ use crate::{debug, info, trace};
 use crate::gdt::{KERNEL_CODE_SEGMENT_INDEX, KERNEL_DATA_SEGMENT_INDEX, USER_CODE_SEGMENT_INDEX, USER_DATA_SEGMENT_INDEX};
 
 /// Initialize syscall support
-/// Sets up the MSRs for the `syscall` instruction
+///
+/// Sets up the MSRs for the `syscall` instruction.
 pub fn init_syscall() {
     unsafe {
         let efer_val = Efer::read();
@@ -40,7 +41,8 @@ pub fn init_syscall() {
 }
 
 /// Assembly syscall handler entry point
-/// Saves registers on stack (Linux pt_regs style) and calls handle_syscall
+///
+/// Saves registers on stack (Linux pt_regs style) and calls handle_syscall.
 ///
 /// TODO: NOT SMP SAFE
 #[unsafe(naked)]
@@ -94,16 +96,15 @@ unsafe extern "C" fn syscall_handler() {
     )
 }
 
-/// Temporary storage for user RSP during syscall
-/// ts very ugly
+/// Temporary storage for user RSP during syscall (TODO: very ugly)
 static mut USER_RSP: u64 = 0;
 
-/// Kernel stack for syscall handling
-/// TODO: replace with something better asap
+/// Kernel stack for syscall handling (TODO: replace with something better ASAP)
 static mut KERNEL_SYSCALL_STACK: u64 = 0;
 
 /// Set the kernel stack for syscall handling
-/// Must be called when switching to a user task
+///
+/// Must be called when switching to a user task.
 ///
 /// # Safety
 /// This function is not SMP-safe as it modifies a global variable.
@@ -128,24 +129,26 @@ pub struct SyscallRegs {
     pub rbp: u64,
     pub rbx: u64,
 
-    // beginning of syscall arguments
-    /// argument 6
+    /// Argument 6
     pub r9: u64,
-    /// argument 5
+    /// Argument 5
     pub r8: u64,
-    /// argument 4
+    /// Argument 4
     pub r10: u64,
-    /// argument 3
+    /// Argument 3
     pub rdx: u64,
-    /// argument 2
+    /// Argument 2
     pub rsi: u64,
-    /// argument 1
+    /// Argument 1
     pub rdi: u64,
 
-    /// syscall number (original value in rax)
+    /// Syscall number (original value in rax)
     pub rax: u64,
+    /// Instruction pointer
     pub rip: u64,
+    /// Flags register
     pub rflags: u64,
+    /// Stack pointer
     pub rsp: u64,
 }
 
@@ -159,6 +162,7 @@ pub enum SyscallNumber {
 }
 
 impl SyscallNumber {
+    /// Convert a u64 to a syscall number
     pub fn from_u64(n: u64) -> Option<Self> {
         match n {
             0 => Some(SyscallNumber::Exit),
@@ -172,7 +176,7 @@ impl SyscallNumber {
 /// Syscall handler - called from assembly stub with pointer to pt_regs
 ///
 /// # Safety
-/// Must only be called from syscall interrupt handler
+/// Must only be called from syscall interrupt handler.
 pub unsafe extern "C" fn handle_syscall(regs: *mut SyscallRegs) -> u64 {
     let regs = unsafe { &*regs };
     
@@ -199,7 +203,7 @@ pub unsafe extern "C" fn handle_syscall(regs: *mut SyscallRegs) -> u64 {
 /// * `exit_code` - Exit status code
 ///
 /// # Returns
-/// Never returns (task is terminated)
+/// Never returns (task is terminated).
 fn sys_exit(_exit_code: i32) -> u64 {
     trace!("Task exiting with code {}", _exit_code);
     
@@ -214,7 +218,7 @@ fn sys_exit(_exit_code: i32) -> u64 {
 /// * `count` - Number of bytes to write
 ///
 /// # Returns
-/// Number of bytes written, or -1 on error
+/// Number of bytes written, or -1 on error.
 fn sys_write(fd: i32, buf: *const u8, count: usize) -> u64 {
     use crate::{print, serial_print};
     

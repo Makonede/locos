@@ -1,3 +1,8 @@
+//! Memory allocators for heap and page allocation.
+//!
+//! Provides buddy allocators for both fixed-size heap allocation
+//! and dynamic page-level virtual memory allocation.
+
 extern crate alloc;
 
 use alloc::collections::VecDeque;
@@ -19,16 +24,18 @@ use super::{
     freelist::{FreeList, Node},
 };
 
+/// Global page allocator instance
 pub static PAGE_ALLOCATOR: Mutex<Option<PageAllocator>> = Mutex::new(None);
 
-/// The start address for the PageAllocator region (must not overlap with heap).
+/// Start address for the page allocator region (must not overlap with heap)
 pub const PAGEALLOC_START: u64 = 0xFFFF_9000_0000_0000;
 
-/// Initializes the global page allocator with a region sized for the available RAM.
+/// Initialize the global page allocator with a region sized for the available RAM
+///
 /// Should be called once during kernel setup.
 ///
 /// # Arguments
-/// * `available_ram_bytes` - The amount of RAM to manage with the page allocator.
+/// * `available_ram_bytes` - The amount of RAM to manage with the page allocator
 pub fn init_page_allocator(available_ram_bytes: u64) {
     let mut alloc_lock = PAGE_ALLOCATOR.lock();
     if alloc_lock.is_some() {
@@ -57,20 +64,23 @@ pub fn init_page_allocator(available_ram_bytes: u64) {
     );
 }
 
+/// Global allocator for heap memory
 #[global_allocator]
 pub static ALLOCATOR: Locked<BuddyAlloc<21, 16>> = Locked::new(BuddyAlloc::new(
     VirtAddr::new(HEAP_START as u64),
     VirtAddr::new(HEAP_START as u64 + HEAP_SIZE as u64),
 ));
 
+/// Heap start address in virtual memory
 pub const HEAP_START: usize = 0xFFFF_8800_0000_0000;
-pub const HEAP_SIZE: usize = 16 * 1024 * 1024; // 16 MiB
+/// Heap size in bytes (16 MiB)
+pub const HEAP_SIZE: usize = 16 * 1024 * 1024;
 
 /// Initialize a heap region in virtual memory and map it to physical frames
 ///
 /// # Safety
-/// This function is unsafe because the caller must guarantee that the
-/// given memory region is unused and that the frame allocator is valid
+/// The caller must guarantee that the given memory region is unused
+/// and that the frame allocator is valid.
 pub unsafe fn init_heap() -> Result<(), MapToError<Size4KiB>> {
     let heap_start = Page::containing_address(VirtAddr::new(HEAP_START as u64));
     let heap_end = Page::containing_address(VirtAddr::new((HEAP_START + HEAP_SIZE - 1) as u64));
@@ -99,36 +109,33 @@ pub unsafe fn init_heap() -> Result<(), MapToError<Size4KiB>> {
     Ok(())
 }
 
-/// A simple wrapper around spin::Mutex to provide safe interior mutability
+/// Wrapper around spin::Mutex for safe interior mutability
 pub struct Locked<A> {
     inner: spin::Mutex<A>,
 }
 
 impl<A> Locked<A> {
+    /// Create a new locked instance
     pub const fn new(inner: A) -> Self {
         Locked {
             inner: spin::Mutex::new(inner),
         }
     }
 
+    /// Lock and get access to the inner value
     pub fn lock(&self) -> spin::MutexGuard<A> {
         self.inner.lock()
     }
 }
 
-/// A buddy allocator for managing heap memory allocations
+/// Buddy allocator for managing heap memory allocations
 ///
-/// The buddy allocator splits memory into power-of-two sized blocks, making it
-/// efficient for allocating memory in small chunks while minimizing fragmentation.
+/// Splits memory into power-of-two sized blocks for efficient allocation
+/// with minimal fragmentation.
 ///
 /// # Type Parameters
 /// * `L`: Number of levels in the buddy system
 /// * `S`: Size of the smallest block in bytes
-///
-/// # Notes
-/// * The allocator uses fixed-size arrays for free lists which trades some memory
-///   overhead for implementation simplicity and deterministic performance.
-/// * The number of possible blocks at the lowest level is 2^(L-1)
 pub struct BuddyAlloc<const L: usize, const S: usize> {
     heap_start: VirtAddr,
     _heap_end: VirtAddr,

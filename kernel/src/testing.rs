@@ -1,5 +1,10 @@
+//! Test framework for locOS.
+//!
+//! Provides test runner and utilities for kernel tests.
+
 use crate::{serial_print, serial_println};
 
+/// QEMU exit codes for test results
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum QemuExitCode {
@@ -7,6 +12,7 @@ pub enum QemuExitCode {
     Failed = 0x11,
 }
 
+/// Exit QEMU with the given exit code
 pub fn exit_qemu(exit_code: QemuExitCode) {
     use x86_64::instructions::port::Port;
 
@@ -16,8 +22,11 @@ pub fn exit_qemu(exit_code: QemuExitCode) {
     }
 }
 
+/// Trait for items that can be tested
 pub trait Testable {
+    /// Run the test
     fn run(&self) -> ();
+    /// Get the test name
     fn name(&self) -> &'static str;
 }
 
@@ -41,6 +50,7 @@ where
     }
 }
 
+/// Test runner that executes all tests
 #[cfg(test)]
 pub fn test_runner(tests: &[&dyn Testable]) {
     use crate::{hcf, serial_print, serial_println, tasks::scheduler::kinit_multitasking};

@@ -1,3 +1,7 @@
+//! Stack allocator for kernel and user tasks.
+//!
+//! Provides slab allocation for kernel task stacks and user stack management.
+
 use spin::Mutex;
 use x86_64::{
     VirtAddr,
@@ -13,17 +17,19 @@ use crate::{
     trace, warn,
 };
 
+/// Global kernel stack allocator
 pub static STACK_ALLOCATOR: Mutex<KernelSlabAlloc> = Mutex::new(KernelSlabAlloc::new());
 
 /// Start address for kernel task stacks
 const KERNEL_TASKS_START: u64 = 0xFFFF_F300_0000_0000;
-/// start of user stack region. grows downwards
+/// Start of user stack region (grows downwards)
 pub const USER_STACKS_START: u64 = 0x0000_7fff_ffff_0000;
-/// size of user stack in pages. Must be power of 2
+/// Size of user stack in pages (must be power of 2)
 pub const USTACK_SIZE: u64 = 512;
-/// initial number of pages to allocate for user stack
+/// Initial number of pages to allocate for user stack
 pub const INITIAL_STACK_PAGES: u64 = 4;
 
+/// Errors that can occur during stack allocation
 #[derive(Debug, Clone, Copy)]
 pub enum StackAllocError {
     FrameError,
@@ -41,9 +47,9 @@ impl core::fmt::Display for StackAllocError {
 
 impl core::error::Error for StackAllocError {}
 
-/// slab allocator for kernel task stacks
+/// Slab allocator for kernel task stacks
 ///
-/// supports max of 128 kernel tasks. Starts at KERNEL_TASKS_START
+/// Supports up to 128 kernel tasks. Starts at KERNEL_TASKS_START.
 pub struct KernelSlabAlloc {
     block_bitmap: u128,
 }
@@ -55,13 +61,14 @@ impl Default for KernelSlabAlloc {
 }
 
 impl KernelSlabAlloc {
+    /// Create a new kernel stack allocator
     pub const fn new() -> Self {
         KernelSlabAlloc { block_bitmap: 0 }
     }
 
-    /// allocate a stack and guard page
+    /// Allocate a stack with guard page
     ///
-    /// returns the address to the stack bottom (highest usable address)
+    /// Returns the address to the stack bottom (highest usable address).
     pub fn get_stack(&mut self) -> Result<VirtAddr, StackAllocError> {
         let block_index = self.block_bitmap.trailing_ones();
 

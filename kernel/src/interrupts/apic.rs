@@ -1,3 +1,7 @@
+//! Advanced Programmable Interrupt Controller (APIC) support.
+//!
+//! Provides APIC initialization and interrupt handling using x2APIC.
+
 use crate::{error, info, pci::nvme::{NVME_ADMIN_VECTOR, NVME_IO_VECTOR}, tasks::scheduler::schedule, warn};
 use acpi::{
     AcpiHandler, AcpiTables, InterruptModel,
