@@ -54,7 +54,7 @@ use memory::{
     init_frame_allocator, init_heap, init_page_allocator,
     paging::{self, fill_page_list},
 };
-use output::{flanterm_init, framebuffer::get_info_from_frambuffer};
+use output::{flanterm_init, framebuffer::get_info_from_framebuffer};
 use x86_64::{VirtAddr, registers::debug};
 
 
@@ -145,7 +145,7 @@ unsafe extern "C" fn kernel_main() -> ! {
 
     flanterm_init(
         framebuffer.addr() as *mut u32,
-        get_info_from_frambuffer(&framebuffer),
+        get_info_from_framebuffer(&framebuffer),
     );
 
     let rsdp_addr = RSDP_REQUEST

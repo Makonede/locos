@@ -15,7 +15,7 @@ pub static mut IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     idt.breakpoint.set_handler_fn(breakpoint_handler);
     idt.page_fault.set_handler_fn(page_fault_handler);
     idt.general_protection_fault
-        .set_handler_fn(general_proction_fault_handler);
+        .set_handler_fn(general_protection_fault_handler);
     unsafe {
         idt.double_fault
             .set_handler_fn(double_fault_handler)
@@ -58,7 +58,7 @@ extern "x86-interrupt" fn page_fault_handler(
 }
 
 /// General protection fault handler
-extern "x86-interrupt" fn general_proction_fault_handler(
+extern "x86-interrupt" fn general_protection_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {

@@ -43,7 +43,7 @@ pub struct FramebufferInfo {
 }
 
 /// Extract framebuffer information from a Limine framebuffer
-pub fn get_info_from_frambuffer(framebuffer: &Framebuffer) -> FramebufferInfo {
+pub fn get_info_from_framebuffer(framebuffer: &Framebuffer) -> FramebufferInfo {
     let pitch = framebuffer.pitch() as usize;
     let bpp = framebuffer.bpp() as usize;
     let width = framebuffer.width() as usize;
