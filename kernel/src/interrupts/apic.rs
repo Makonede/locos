@@ -31,22 +31,35 @@ use crate::{
 
 use super::{idt::IDT, pic::disable_legacy_pics};
 
+/// Page size constant (4 KiB)
 const PAGE_SIZE: usize = 0x1000;
+/// x2APIC End of Interrupt MSR
 const X2APIC_EOI_MSR: u32 = 0x80B;
 
+/// Virtual address space for I/O APIC mappings
 const IOAPICS_VIRTUAL_START: u64 = 0xFFFF_F000_0000_0000;
+/// Virtual address space for xAPIC mappings
 const XAPIC_VIRTUAL_START: u64 = 0xFFFF_F100_0000_0000;
+/// Virtual address space for ACPI mappings
 const ACPI_MAPPINGS_START: u64 = 0xFFFF_F200_0000_0000;
+/// Local APIC timer interrupt vector
 pub const LAPIC_TIMER_VECTOR: u8 = 0x30;
+/// Local APIC error interrupt vector
 const LAPIC_ERROR_VECTOR: u8 = 0x31;
+/// Local APIC spurious interrupt vector
 const LAPIC_SPURIOUS_VECTOR: u8 = 0xFF;
+/// I/O APIC timer interrupt vector
 const IOAPIC_TIMER_VECTOR: u8 = 0x20;
+/// I/O APIC timer input pin
 const IOAPIC_TIMER_INPUT: u8 = 0;
+/// PS/2 keyboard interrupt vector
 const KEYBOARD_VECTOR: u8 = 0x21;
+/// PS/2 keyboard IRQ number
 const KEYBOARD_IRQ: u8 = 1;
+/// Timer reload value (1193182 Hz / 20 = 50 Hz)
 const TIMER_RELOAD: u16 = (1193182u32 / 20) as u16;
 
-/// Interrupt handler for the PIT.
+/// Interrupt handler for the PIT (Programmable Interval Timer)
 ///
 /// Acknowledges the interrupt by writing to the EOI MSR.
 extern "x86-interrupt" fn ioapic_timer_handler(_stack_frame: InterruptStackFrame) {

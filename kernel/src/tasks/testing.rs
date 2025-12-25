@@ -1,3 +1,5 @@
+//! Task scheduler tests
+
 use crate::{
     println,
     tasks::scheduler::exit_task,
@@ -11,6 +13,7 @@ fn test_multitasking() {
     }
 }
 
+/// Test task function
 fn do_something() -> ! {
     for i in 0..1000 {
         println!("iteration {}", i);
@@ -19,6 +22,7 @@ fn do_something() -> ! {
     exit_task();
 }
 
+/// Test task function
 fn do_something_else() -> ! {
     for i in 0..1000 {
         println!("iteration from 2nd thread {}", i);

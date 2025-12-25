@@ -1,3 +1,7 @@
+//! xHCI (eXtensible Host Controller Interface) driver for USB 3.0.
+//!
+//! Provides xHCI controller initialization and management.
+
 use alloc::vec::Vec;
 use spin::Mutex;
 
@@ -11,8 +15,10 @@ use crate::{
     },
 };
 
+/// Global xHCI registers instance
 pub static XHCI_REGS: Mutex<Option<XhciRegisters>> = Mutex::new(None);
 
+/// Find all xHCI devices in the system
 #[allow(clippy::let_and_return)]
 pub fn find_xhci_devices() -> Vec<PciDevice> {
     let lock = PCI_MANAGER.lock();
@@ -30,11 +36,10 @@ pub fn find_xhci_devices() -> Vec<PciDevice> {
     xhci_devices
 }
 
-/// find xhci devices and resets the controller.
-/// 
-/// allocates the dcbas
-/// 
-/// at the end, populates the XHCI_REGS static.
+/// Initialize the xHCI controller
+///
+/// Finds xHCI devices, resets the controller, and allocates the DCBAA.
+/// Populates the XHCI_REGS static at the end.
 pub fn xhci_init() {
     let devices = find_xhci_devices();
     let Some(primary_device) = devices.first() else {

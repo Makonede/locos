@@ -1,15 +1,19 @@
+//! Helper functions for xHCI initialization.
+//!
+//! Provides utilities for setting up DMA buffers, command rings, and DCBAA.
+
 use core::{ptr::write_bytes, fmt};
 
 use x86_64::{PhysAddr, VirtAddr};
 
 use crate::{debug, memory::FRAME_ALLOCATOR, pci::usb::xhci_registers::{CommandRingControl, XhciRegisters}};
 
-/// command ring size in 64 trbs
+/// Command ring size in 64-byte TRBs
 const COMMAND_RING_SIZE: usize = 256;
 
 /// Initialize the Device Context Base Address Array (DCBAA)
-/// 
-/// Should pass in a xchi registers ref
+///
+/// Should pass in an xHCI registers reference.
 pub fn init_dcbaa(xhci_regs: &mut XhciRegisters) {
     let needed_entries = xhci_regs.capability().hcs_params1.max_device_slots() + 1;
 
@@ -22,9 +26,9 @@ pub fn init_dcbaa(xhci_regs: &mut XhciRegisters) {
     debug!("Allocated DCBAA at {:#x} with {} entries", dcbaa_phys, needed_entries);
 }
 
-/// Initialize the trb command ring
-/// 
-/// uses COMMAND_RING_SIZE
+/// Initialize the TRB command ring
+///
+/// Uses COMMAND_RING_SIZE.
 pub fn init_command_ring(xhci_regs: &mut XhciRegisters) {
     let needed_frames = (COMMAND_RING_SIZE * 8).div_ceil(4096).next_power_of_two();
     let (ring_phys, ring_virt) = get_zeroed_dma(needed_frames);
@@ -40,6 +44,7 @@ pub fn init_command_ring(xhci_regs: &mut XhciRegisters) {
 }
 
 
+/// Allocate zeroed DMA memory
 fn get_zeroed_dma(frames: usize) -> (PhysAddr, VirtAddr) {
     let mut lock = FRAME_ALLOCATOR.lock();
     let allocator = lock.as_mut().unwrap();

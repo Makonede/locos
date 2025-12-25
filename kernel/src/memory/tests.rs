@@ -1,3 +1,4 @@
+//! Memory subsystem tests
 
 #[test_case]
 fn test_simple_alloc() {
