@@ -14,6 +14,7 @@ pub mod device;
 pub mod mcfg;
 pub mod msi;
 pub mod vmm;
+pub mod dma;
 
 pub mod usb;
 pub mod nvme;

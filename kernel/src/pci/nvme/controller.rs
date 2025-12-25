@@ -8,13 +8,17 @@ use spin::Mutex;
 use x86_64::{PhysAddr, VirtAddr};
 
 use super::{
+    commands::{IdentifyController, IdentifyNamespace, NvmeCommand, NvmeCompletion},
     registers::NvmeRegisters,
-    commands::{NvmeCommand, NvmeCompletion, IdentifyController, IdentifyNamespace},
 };
 use crate::{
-    debug, info, memory::FRAME_ALLOCATOR, pci::{
-        PCI_MANAGER, config::device_classes, device::{BarInfo, PciDevice}, msi::{MsiXInfo, setup_msix}, vmm::map_bar
-    }, tasks::scheduler::kyield_task, warn
+    debug, info,
+    memory::FRAME_ALLOCATOR,
+    pci::{
+        config::device_classes, device::{BarInfo, PciDevice}, dma::{get_zeroed_dma, DmaError, DMA_MANAGER}, msi::{setup_msix, MsiXInfo}, vmm::map_bar, PCI_MANAGER
+    },
+    tasks::scheduler::kyield_task,
+    warn,
 };
 
 /// Global NVMe controller instance
@@ -48,6 +52,12 @@ pub enum NvmeError {
     PciError,
     NoIoQueue,
     BufferTooSmall,
+}
+
+impl From<DmaError> for NvmeError {
+    fn from(value: DmaError) -> Self {
+        NvmeError::AllocationFailed
+    }
 }
 
 /// Queue management structure
@@ -110,18 +120,24 @@ pub struct NvmeController {
 impl NvmeQueue {
     /// Create a new queue pair
     pub fn new(queue_id: u16, size: u16) -> Result<Self, NvmeError> {
-        let sq_size = size as usize * 64;  // 64 bytes per SQ entry
-        let cq_size = size as usize * 16;  // 16 bytes per CQ entry
+        let sq_size = size as usize * 64; // 64 bytes per SQ entry
+        let cq_size = size as usize * 16; // 16 bytes per CQ entry
         let total_size = sq_size + cq_size;
         let pages_needed = total_size.div_ceil(4096);
-        
-        let (sq_phys, sq_virt) = get_zeroed_dma(pages_needed)?;
+
+        let buffer = get_zeroed_dma(pages_needed)?;
+        let sq_virt = buffer.virt_addr;
+        let sq_phys = buffer.phys_addr;
         let cq_virt = VirtAddr::new(sq_virt.as_u64() + sq_size as u64);
         let cq_phys = PhysAddr::new(sq_phys.as_u64() + sq_size as u64);
-        
-        debug!("Created NVMe queue {}: SQ at {:#x}, CQ at {:#x}", 
-               queue_id, sq_virt.as_u64(), cq_virt.as_u64());
-        
+
+        debug!(
+            "Created NVMe queue {}: SQ at {:#x}, CQ at {:#x}",
+            queue_id,
+            sq_virt.as_u64(),
+            cq_virt.as_u64()
+        );
+
         Ok(Self {
             sq_entries: sq_virt,
             sq_phys,
@@ -136,44 +152,47 @@ impl NvmeQueue {
             interrupt_vector: None,
         })
     }
-    
+
     /// Submit a command to the submission queue
     pub fn submit_command(&mut self, mut cmd: NvmeCommand) -> Result<u16, NvmeError> {
         let next_tail = (self.sq_tail + 1) % self.size;
         if next_tail == self.sq_head {
             return Err(NvmeError::QueueFull);
         }
-        
+
         let cid = self.sq_tail;
         cmd.set_command_id(cid);
-        
+
         unsafe {
-            let entry_ptr = self.sq_entries.as_mut_ptr::<NvmeCommand>()
+            let entry_ptr = self
+                .sq_entries
+                .as_mut_ptr::<NvmeCommand>()
                 .add(self.sq_tail as usize);
             core::ptr::write_volatile(entry_ptr, cmd);
         }
-        
+
         self.sq_tail = next_tail;
-        
+
         Ok(cid)
     }
-    
+
     /// Check for completion queue entries
     pub fn check_completion(&mut self) -> Option<NvmeCompletion> {
         let entry_ptr = unsafe {
-            self.cq_entries.as_ptr::<NvmeCompletion>()
+            self.cq_entries
+                .as_ptr::<NvmeCompletion>()
                 .add(self.cq_head as usize)
         };
-        
+
         let completion = unsafe { core::ptr::read_volatile(entry_ptr) };
-        
+
         if completion.is_valid(self.cq_phase) {
             self.cq_head = (self.cq_head + 1) % self.size;
-            
+
             if self.cq_head == 0 {
                 self.cq_phase = !self.cq_phase;
             }
-            
+
             Some(completion)
         } else {
             None
@@ -184,11 +203,17 @@ impl NvmeQueue {
 impl NvmeController {
     /// Find and initialize the first NVMe controller
     pub fn new(pci_device: PciDevice) -> Result<Self, NvmeError> {
-        info!("Initializing NVMe controller: {:02x}:{:02x}.{} [{:04x}:{:04x}]",
-              pci_device.bus, pci_device.device, pci_device.function,
-              pci_device.vendor_id, pci_device.device_id);
-        
-        let memory_bar = pci_device.bars
+        info!(
+            "Initializing NVMe controller: {:02x}:{:02x}.{} [{:04x}:{:04x}]",
+            pci_device.bus,
+            pci_device.device,
+            pci_device.function,
+            pci_device.vendor_id,
+            pci_device.device_id
+        );
+
+        let memory_bar = pci_device
+            .bars
             .iter()
             .find_map(|bar| {
                 if let BarInfo::Memory(memory_bar) = bar {
@@ -198,23 +223,26 @@ impl NvmeController {
                 }
             })
             .ok_or(NvmeError::PciError)?;
-        
+
         let mapped_bar = map_bar(memory_bar).map_err(|_| NvmeError::PciError)?;
         let registers = unsafe { NvmeRegisters::new(mapped_bar.virtual_address) };
-        
-        debug!("NVMe registers mapped at {:#x}", mapped_bar.virtual_address.as_u64());
-        
+
+        debug!(
+            "NVMe registers mapped at {:#x}",
+            mapped_bar.virtual_address.as_u64()
+        );
+
         let max_queue_entries = registers.max_queue_entries();
         let doorbell_stride = registers.doorbell_stride();
-        
+
         debug!("NVMe Controller Capabilities:");
         debug!("  Max Queue Entries: {}", max_queue_entries);
         debug!("  Doorbell Stride: {} bytes", doorbell_stride);
         debug!("  Min Page Size: {} bytes", registers.min_page_size());
         debug!("  Max Page Size: {} bytes", registers.max_page_size());
-        
+
         let admin_queue = NvmeQueue::new(0, core::cmp::min(max_queue_entries, 64))?;
-        
+
         let mut controller = Self {
             pci_device,
             registers,
@@ -231,7 +259,7 @@ impl NvmeController {
 
         Ok(controller)
     }
-    
+
     /// Initialize the NVMe controller
     fn initialize(&mut self) -> Result<(), NvmeError> {
         info!("Initializing NVMe controller");
@@ -263,11 +291,17 @@ impl NvmeController {
         let mut msix_info = setup_msix(&self.pci_device, NVME_VECTOR_NUM, NVME_VECTOR_BASE)
             .map_err(|_| NvmeError::PciError)?;
 
-        info!("MSI-X enabled for NVMe controller with {} vectors (base={:#x})",
-              NVME_VECTOR_NUM, NVME_VECTOR_BASE);
+        info!(
+            "MSI-X enabled for NVMe controller with {} vectors (base={:#x})",
+            NVME_VECTOR_NUM, NVME_VECTOR_BASE
+        );
 
-        msix_info.enable_vector(0).map_err(|_| NvmeError::PciError)?;
-        msix_info.enable_vector(1).map_err(|_| NvmeError::PciError)?;
+        msix_info
+            .enable_vector(0)
+            .map_err(|_| NvmeError::PciError)?;
+        msix_info
+            .enable_vector(1)
+            .map_err(|_| NvmeError::PciError)?;
 
         self.msix_info = Some(msix_info);
         Ok(())
@@ -302,17 +336,26 @@ impl NvmeController {
     fn setup_admin_queues(&mut self) -> Result<(), NvmeError> {
         info!("Setting up admin queues");
 
-        let sq_phys = PhysAddr::new(self.admin_queue.sq_entries.as_u64() -
-                                   FRAME_ALLOCATOR.lock().as_ref().unwrap().hddm_offset);
-        let cq_phys = PhysAddr::new(self.admin_queue.cq_entries.as_u64() -
-                                   FRAME_ALLOCATOR.lock().as_ref().unwrap().hddm_offset);
+        let sq_phys = PhysAddr::new(
+            self.admin_queue.sq_entries.as_u64()
+                - FRAME_ALLOCATOR.lock().as_ref().unwrap().hddm_offset,
+        );
+        let cq_phys = PhysAddr::new(
+            self.admin_queue.cq_entries.as_u64()
+                - FRAME_ALLOCATOR.lock().as_ref().unwrap().hddm_offset,
+        );
 
-        self.registers.set_admin_queue_attributes(self.admin_queue.size, self.admin_queue.size);
+        self.registers
+            .set_admin_queue_attributes(self.admin_queue.size, self.admin_queue.size);
 
         self.registers.set_admin_sq_base(sq_phys.as_u64());
         self.registers.set_admin_cq_base(cq_phys.as_u64());
 
-        info!("Admin queues configured: SQ={:#x}, CQ={:#x}", sq_phys.as_u64(), cq_phys.as_u64());
+        info!(
+            "Admin queues configured: SQ={:#x}, CQ={:#x}",
+            sq_phys.as_u64(),
+            cq_phys.as_u64()
+        );
         Ok(())
     }
 
@@ -338,17 +381,21 @@ impl NvmeController {
     }
 
     /// Submit an admin command and yield to scheduler for completion
-    /// 
+    ///
     /// will issue msi-x interrupt when command completes
     fn submit_admin_command(&mut self, cmd: NvmeCommand) -> Result<NvmeCompletion, NvmeError> {
         // Submit command to admin queue
         let cid = self.admin_queue.submit_command(cmd)?;
 
-        self.registers.ring_doorbell(0, false, self.admin_queue.sq_tail);
+        self.registers
+            .ring_doorbell(0, false, self.admin_queue.sq_tail);
 
         kyield_task(NVME_ADMIN_VECTOR);
 
-        let completion = self.admin_queue.check_completion().ok_or(NvmeError::CommandNotCompleted)?;
+        let completion = self
+            .admin_queue
+            .check_completion()
+            .ok_or(NvmeError::CommandNotCompleted)?;
 
         if !completion.is_success() {
             return Err(NvmeError::CommandFailed(completion.status_code()));
@@ -361,14 +408,12 @@ impl NvmeController {
     fn identify_controller(&mut self) -> Result<(), NvmeError> {
         info!("Identifying NVMe controller");
 
-        let (buffer_phys, buffer_virt) = get_zeroed_dma(1)?;
+        let buffer = DMA_MANAGER.lock().get_pool_4kb().ok_or(NvmeError::AllocationFailed)?;
 
-        let cmd = NvmeCommand::identify_controller(buffer_phys.as_u64());
+        let cmd = NvmeCommand::identify_controller(buffer.phys_addr.as_u64());
         let _completion = self.submit_admin_command(cmd)?;
 
-        let identify_data = unsafe {
-            &*(buffer_virt.as_ptr::<IdentifyController>())
-        };
+        let identify_data = unsafe { &*(buffer.virt_addr.as_ptr::<IdentifyController>()) };
 
         let model = core::str::from_utf8(&identify_data.mn)
             .unwrap_or("Unknown")
@@ -415,15 +460,13 @@ impl NvmeController {
     fn identify_namespace(&mut self, nsid: u32) -> Result<NvmeNamespace, NvmeError> {
         debug!("Identifying namespace {}", nsid);
 
-        let (buffer_phys, buffer_virt) = get_zeroed_dma(1)?;
+        let buffer = get_zeroed_dma(1)?;
 
-        let cmd = NvmeCommand::identify_namespace(nsid, buffer_phys.as_u64());
+        let cmd = NvmeCommand::identify_namespace(nsid, buffer.phys_addr.as_u64());
 
         let _completion = self.submit_admin_command(cmd)?;
 
-        let identify_data = unsafe {
-            &*(buffer_virt.as_ptr::<IdentifyNamespace>())
-        };
+        let identify_data = unsafe { &*(buffer.virt_addr.as_ptr::<IdentifyNamespace>()) };
 
         if identify_data.nsze == 0 {
             return Err(NvmeError::InvalidNamespace);
@@ -434,8 +477,11 @@ impl NvmeController {
         let capacity_blocks = identify_data.ncap;
 
         info!("Namespace {} Information:", nsid);
-        info!("  Size: {} blocks ({} MB)", size_blocks,
-              (size_blocks * block_size as u64) / (1024 * 1024));
+        info!(
+            "  Size: {} blocks ({} MB)",
+            size_blocks,
+            (size_blocks * block_size as u64) / (1024 * 1024)
+        );
         info!("  Block Size: {} bytes", block_size);
         info!("  Capacity: {} blocks", capacity_blocks);
 
@@ -454,20 +500,21 @@ impl NvmeController {
         let queue_size = core::cmp::min(self.max_queue_entries, 64);
         let mut io_queue = NvmeQueue::new(1, queue_size)?;
 
-        let msix_info = self.msix_info.as_ref()
-            .ok_or(NvmeError::PciError)?;
+        let msix_info = self.msix_info.as_ref().ok_or(NvmeError::PciError)?;
 
-        let io_vector = msix_info.vectors.get(1)
-            .ok_or(NvmeError::PciError)?;
+        let io_vector = msix_info.vectors.get(1).ok_or(NvmeError::PciError)?;
 
         io_queue.interrupt_vector = Some(io_vector.vector);
 
-        info!("Creating I/O Completion Queue with MSI-X interrupt vector {:#x}", io_vector.vector);
+        info!(
+            "Creating I/O Completion Queue with MSI-X interrupt vector {:#x}",
+            io_vector.vector
+        );
         let create_cq_cmd = NvmeCommand::create_io_cq_with_interrupt(
             1,
             queue_size,
             io_queue.cq_phys.as_u64(),
-            io_vector.index
+            io_vector.index,
         );
 
         self.submit_admin_command(create_cq_cmd)?;
@@ -495,7 +542,9 @@ impl NvmeController {
 
         kyield_task(NVME_IO_VECTOR);
 
-        let completion = io_queue.check_completion().ok_or(NvmeError::CommandNotCompleted)?;
+        let completion = io_queue
+            .check_completion()
+            .ok_or(NvmeError::CommandNotCompleted)?;
 
         if !completion.is_success() {
             return Err(NvmeError::CommandFailed(completion.status_code()));
@@ -505,7 +554,13 @@ impl NvmeController {
     }
 
     /// Read blocks from a namespace
-    pub fn read_blocks(&mut self, nsid: u32, lba: u64, blocks: u16, buffer: &mut [u8]) -> Result<(), NvmeError> {
+    pub fn read_blocks(
+        &mut self,
+        nsid: u32,
+        lba: u64,
+        blocks: u16,
+        buffer: &mut [u8],
+    ) -> Result<(), NvmeError> {
         if !self.namespaces.iter().any(|ns| ns.nsid == nsid) {
             return Err(NvmeError::InvalidNamespace);
         }
@@ -518,25 +573,34 @@ impl NvmeController {
         }
 
         let pages_needed = (required_size + 4095) / 4096;
-        let (buffer_phys, buffer_virt) = get_zeroed_dma(pages_needed)?;
+        let dma_buffer = get_zeroed_dma(pages_needed)?;
 
-        let cmd = NvmeCommand::read(nsid, lba, blocks, buffer_phys.as_u64());
+        let cmd = NvmeCommand::read(nsid, lba, blocks, dma_buffer.phys_addr.as_u64());
         self.submit_io_command(cmd)?;
 
         unsafe {
             core::ptr::copy_nonoverlapping(
-                buffer_virt.as_ptr::<u8>(),
+                dma_buffer.virt_addr.as_ptr::<u8>(),
                 buffer.as_mut_ptr(),
-                required_size
+                required_size,
             );
         }
 
-        debug!("Read {} blocks from LBA {} (namespace {})", blocks, lba, nsid);
+        debug!(
+            "Read {} blocks from LBA {} (namespace {})",
+            blocks, lba, nsid
+        );
         Ok(())
     }
 
     /// Write blocks to a namespace
-    pub fn write_blocks(&mut self, nsid: u32, lba: u64, blocks: u16, buffer: &[u8]) -> Result<(), NvmeError> {
+    pub fn write_blocks(
+        &mut self,
+        nsid: u32,
+        lba: u64,
+        blocks: u16,
+        buffer: &[u8],
+    ) -> Result<(), NvmeError> {
         if !self.namespaces.iter().any(|ns| ns.nsid == nsid) {
             return Err(NvmeError::InvalidNamespace);
         }
@@ -549,38 +613,25 @@ impl NvmeController {
         }
 
         let pages_needed = (required_size + 4095) / 4096;
-        let (buffer_phys, buffer_virt) = get_zeroed_dma(pages_needed)?;
+        let dma_buffer = get_zeroed_dma(pages_needed)?;
 
         unsafe {
             core::ptr::copy_nonoverlapping(
                 buffer.as_ptr(),
-                buffer_virt.as_mut_ptr::<u8>(),
-                required_size
+                dma_buffer.virt_addr.as_mut_ptr::<u8>(),
+                required_size,
             );
         }
 
-        let cmd = NvmeCommand::write(nsid, lba, blocks, buffer_phys.as_u64());
+        let cmd = NvmeCommand::write(nsid, lba, blocks, dma_buffer.phys_addr.as_u64());
         self.submit_io_command(cmd)?;
 
-        debug!("Wrote {} blocks to LBA {} (namespace {})", blocks, lba, nsid);
+        debug!(
+            "Wrote {} blocks to LBA {} (namespace {})",
+            blocks, lba, nsid
+        );
         Ok(())
     }
-}
-
-/// Helper function to allocate zeroed DMA memory (reuse xHCI pattern)
-fn get_zeroed_dma(frames: usize) -> Result<(PhysAddr, VirtAddr), NvmeError> {
-    let mut lock = FRAME_ALLOCATOR.lock();
-    let allocator = lock.as_mut().ok_or(NvmeError::AllocationFailed)?;
-
-    let virt = allocator.allocate_contiguous_pages(frames)
-        .ok_or(NvmeError::AllocationFailed)?;
-
-    unsafe {
-        core::ptr::write_bytes(virt.as_mut_ptr::<()>(), 0, frames * 4096);
-    }
-
-    let phys = PhysAddr::new(virt.as_u64() - allocator.hddm_offset);
-    Ok((phys, virt))
 }
 
 /// Find NVMe controllers (similar to find_xhci_devices)
@@ -592,8 +643,9 @@ pub fn find_nvme_controllers() -> Vec<PciDevice> {
     let nvme_devices: Vec<PciDevice> = manager
         .devices
         .iter()
-        .filter(|d| d.class_code == device_classes::MASS_STORAGE && 
-                   d.subclass == 0x08 && d.prog_if == 0x02)
+        .filter(|d| {
+            d.class_code == device_classes::MASS_STORAGE && d.subclass == 0x08 && d.prog_if == 0x02
+        })
         .cloned()
         .collect();
 
@@ -673,7 +725,10 @@ pub fn test_nvme_io() -> Result<(), NvmeError> {
     }
 
     let ns = &namespaces[0];
-    info!("Testing with namespace {}, block size: {} bytes", ns.nsid, ns.block_size);
+    info!(
+        "Testing with namespace {}, block size: {} bytes",
+        ns.nsid, ns.block_size
+    );
 
     // Allocate buffers
     let block_size = ns.block_size as usize;
@@ -714,8 +769,10 @@ pub fn test_nvme_io() -> Result<(), NvmeError> {
         if write_buffer[i] != verify_buffer[i] {
             mismatches += 1;
             if mismatches <= 10 {
-                warn!("Mismatch at offset {}: wrote {:02x}, read {:02x}",
-                      i, write_buffer[i], verify_buffer[i]);
+                warn!(
+                    "Mismatch at offset {}: wrote {:02x}, read {:02x}",
+                    i, write_buffer[i], verify_buffer[i]
+                );
             }
         }
     }

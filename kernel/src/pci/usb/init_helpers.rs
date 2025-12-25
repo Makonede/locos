@@ -1,8 +1,8 @@
-use core::{ptr::write_bytes, fmt};
+use core::fmt;
 
 use x86_64::{PhysAddr, VirtAddr};
 
-use crate::{debug, memory::FRAME_ALLOCATOR, pci::usb::xhci_registers::{CommandRingControl, XhciRegisters}};
+use crate::{debug, pci::{dma::DMA_MANAGER, usb::xhci_registers::{CommandRingControl, XhciRegisters}}};
 
 /// command ring size in 64 trbs
 const COMMAND_RING_SIZE: usize = 256;
@@ -13,10 +13,8 @@ const COMMAND_RING_SIZE: usize = 256;
 pub fn init_dcbaa(xhci_regs: &mut XhciRegisters) {
     let needed_entries = xhci_regs.capability().hcs_params1.max_device_slots() + 1;
 
-    let dcbaa_size = needed_entries as usize * core::mem::size_of::<u64>();
-    let frames_needed = dcbaa_size.div_ceil(4096).next_power_of_two();
-
-    let (dcbaa_phys, _) = get_zeroed_dma(frames_needed);
+    let buffer = DMA_MANAGER.lock().get_pool_4kb().expect("Could not allocate DMA");
+    let dcbaa_phys = buffer.phys_addr;
 
     xhci_regs.set_device_context_base_addr(dcbaa_phys.as_u64());
     debug!("Allocated DCBAA at {:#x} with {} entries", dcbaa_phys, needed_entries);
@@ -26,8 +24,10 @@ pub fn init_dcbaa(xhci_regs: &mut XhciRegisters) {
 /// 
 /// uses COMMAND_RING_SIZE
 pub fn init_command_ring(xhci_regs: &mut XhciRegisters) {
-    let needed_frames = (COMMAND_RING_SIZE * 8).div_ceil(4096).next_power_of_two();
-    let (ring_phys, ring_virt) = get_zeroed_dma(needed_frames);
+    let buffer = DMA_MANAGER.lock().get_pool_4kb()
+        .expect("Failed to allocate command ring memory from 4KB pool");
+    let ring_phys = buffer.phys_addr;
+    let ring_virt = buffer.virt_addr;
 
     let first_trb = ring_virt.as_mut_ptr::<Trb>();
     let first_link_trb = unsafe { first_trb.add(COMMAND_RING_SIZE - 1) };
@@ -38,19 +38,6 @@ pub fn init_command_ring(xhci_regs: &mut XhciRegisters) {
     xhci_regs.set_command_ring_ctrl(CommandRingControl::new(ring_phys.as_u64(), true));
     debug!("Allocated command ring at {:#x} with {} TRBs", ring_phys, COMMAND_RING_SIZE);
 }
-
-
-fn get_zeroed_dma(frames: usize) -> (PhysAddr, VirtAddr) {
-    let mut lock = FRAME_ALLOCATOR.lock();
-    let allocator = lock.as_mut().unwrap();
-    let virt = allocator.allocate_contiguous_pages(frames)
-        .expect("Failed to allocate frames for DMA");
-    unsafe {
-        write_bytes(virt.as_mut_ptr::<()>(), 0, frames * 4096);
-    }
-    (PhysAddr::new(virt.as_u64() - allocator.hddm_offset), virt)
-}
-
 
 /// A single TRB
 /// Each TRB is 16 bytes and contains command, event, or transfer information
