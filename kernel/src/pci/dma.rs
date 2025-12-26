@@ -1,3 +1,5 @@
+use core::ops::Deref;
+
 use alloc::vec::Vec;
 use spin::{Lazy, Mutex};
 use x86_64::{PhysAddr, VirtAddr};
@@ -10,6 +12,7 @@ pub(crate) static DMA_MANAGER: Lazy<Mutex<DmaManager>> =
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DmaError;
 
+#[derive(Debug)]
 pub(crate) struct DmaManager {
     pub pools_4kb: DmaPool,
 }
@@ -30,8 +33,14 @@ impl DmaManager {
     }
 }
 
+/// dynamically allocate dma
+pub(crate) fn get_zeroed_dma(frames: usize) -> Result<DynamicDmaBuffer, DmaError> {
+    let buffer = get_zeroed_dma_internal(frames)?;
+    Ok(DynamicDmaBuffer { buffer })
+}
+
 /// Helper function for internal use during DmaPool initialization
-pub(crate) fn get_zeroed_dma(frames: usize) -> Result<DmaBuffer, DmaError> {
+fn get_zeroed_dma_internal(frames: usize) -> Result<DmaBuffer, DmaError> {
     let mut lock = FRAME_ALLOCATOR.lock();
     let allocator = lock.as_mut().ok_or(DmaError)?;
 
@@ -51,7 +60,7 @@ pub(crate) fn get_zeroed_dma(frames: usize) -> Result<DmaBuffer, DmaError> {
     })
 }
 
-pub(crate) unsafe fn free_zeroed_dma(buffer: DmaBuffer) -> Result<(), DmaError> {
+fn free_zeroed_dma(buffer: DmaBuffer) -> Result<(), DmaError> {
     let mut lock = FRAME_ALLOCATOR.lock();
     let allocator = lock.as_mut().ok_or(DmaError)?;
 
@@ -60,11 +69,50 @@ pub(crate) unsafe fn free_zeroed_dma(buffer: DmaBuffer) -> Result<(), DmaError> 
     Ok(())
 }
 
+#[derive(Debug)]
 pub(crate) struct DmaPool {
     buffers: Vec<DmaBuffer>,
     free_buffers: Vec<usize>,
     /// size in frames
     buffer_size: usize,
+}
+
+#[derive(Debug)]
+pub(crate) struct PooledDmaBuffer {
+    pub buffer: DmaBuffer,
+}
+
+impl Drop for PooledDmaBuffer {
+    fn drop(&mut self) {
+        DMA_MANAGER.lock().free_buffer_4kb(self.buffer);
+    }
+}
+
+impl Deref for PooledDmaBuffer {
+    type Target = DmaBuffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct DynamicDmaBuffer {
+    pub buffer: DmaBuffer,
+}
+
+impl Drop for DynamicDmaBuffer {
+    fn drop(&mut self) {
+        unsafe { free_zeroed_dma(self.buffer) };
+    }
+}
+
+impl Deref for DynamicDmaBuffer {
+    type Target = DmaBuffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,7 +127,7 @@ impl DmaPool {
     pub fn new(buffer_size_frames: usize, num_buffers: usize) -> Result<Self, DmaError> {
         let mut buffers = Vec::with_capacity(num_buffers);
         for _ in 0..num_buffers {
-            let buffer = get_zeroed_dma(buffer_size_frames)?;
+            let buffer = get_zeroed_dma_internal(buffer_size_frames)?;
             buffers.push(buffer);
         }
 
